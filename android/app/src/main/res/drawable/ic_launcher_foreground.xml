@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!--
+      NirapodClick launcher foreground.
+
+      Pure shield + check mark. No text — text is illegible at small
+      launcher sizes; the wordmark lives on splash + about instead.
+
+      The adaptive-icon inset is 16% (per ic_launcher.xml), so the safe
+      drawing area is the central 72dp circle (54px radius). We keep
+      everything inside that circle, with a small margin so the OS
+      mask doesn't clip the checkmark.
+    -->
+
+    <!-- Shield outline (Navy primary). -->
+    <path
+        android:fillColor="#12355B"
+        android:pathData="M54,30
+                          L72,38
+                          L72,54
+                          C72,66 64,76 54,80
+                          C44,76 36,66 36,54
+                          L36,38
+                          Z"/>
+
+    <!-- Inner shield (teal — secondary). -->
+    <path
+        android:fillColor="#0E9F8A"
+        android:pathData="M54,36
+                          L66,41.5
+                          L66,54
+                          C66,63 60.5,71 54,74
+                          C47.5,71 42,63 42,54
+                          L42,41.5
+                          Z"/>
+
+    <!-- Checkmark (amber accent) inside the inner shield. -->
+    <path
+        android:fillColor="#F4B942"
+        android:pathData="M46,55
+                          L51.5,60.5
+                          L62,49.5
+                          L64.5,52
+                          L51.5,64.5
+                          L43.5,57
+                          Z"/>
+</vector>

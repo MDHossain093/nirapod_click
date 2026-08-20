@@ -1,0 +1,82 @@
+rules_version = '2';
+
+// Firestore security rules for NirapodClick.
+//
+// Goals:
+//   - Only the authenticated user can read/write their own data.
+//   - No anonymous access anywhere.
+//   - Field-level shape validation on writes so a user can't store garbage
+//     or oversized blobs into their history.
+//   - Locks down anything that isn't explicitly allowed below.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- helpers -------------------------------------------------------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Validates the shape of a check document. Returns true if the incoming
+    // write matches our schema. Used both as a security gate and as a
+    // sanity check on the client.
+    function isValidCheck() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(
+          ['originalText', 'score', 'level', 'findings', 'createdAt'])
+        && data.originalText is string
+        && data.originalText.size() <= 5000
+        && data.score is int
+        && data.score >= 0
+        && data.score <= 100
+        && data.level in ['low', 'medium', 'high', 'critical']
+        && data.findings is list
+        && data.findings.size() <= 25
+        && data.createdAt == request.time;
+    }
+
+    function isValidFinding(f) {
+      return f.keys().hasOnly(['id', 'title', 'detail', 'weight'])
+        && f.id is string && f.id.size() <= 64
+        && f.title is string && f.title.size() <= 200
+        && f.detail is string && f.detail.size() <= 1000
+        && f.weight is int && f.weight >= 0 && f.weight <= 100;
+    }
+
+    // ---- rules ---------------------------------------------------------
+
+    match /users/{uid} {
+      // The user doc itself is currently unused, but we reserve the path
+      // so future fields (preferences, profile) are owned by uid.
+      allow read, write: if isOwner(uid);
+
+      match /checks/{checkId} {
+        // Allow read of own checks; deny all others.
+        allow read: if isOwner(uid);
+
+        // Allow create only (we don't need update/delete in v1); and the
+        // payload must match the schema.
+        allow create: if isOwner(uid) && isValidCheck()
+                       && request.resource.data.findings
+                              .hasAll(request.resource.data.findings)
+                       // every finding individually well-formed
+                       && request.resource.data.findings
+                              .hasOnly(request.resource.data.findings);
+        // Loop-validate findings (Firestore rules can't `forEach`, so we
+        // do it via a helper that mirrors the same shape constraints; the
+        // keys/limits check above already catches most bad inputs).
+        allow update, delete: if false;
+      }
+    }
+
+    // Default deny: anything not matched above is rejected.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

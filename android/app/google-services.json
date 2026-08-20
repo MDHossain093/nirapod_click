@@ -1,0 +1,90 @@
+{
+  "project_info": {
+    "project_number": "70465752929",
+    "project_id": "nirapodclick",
+    "storage_bucket": "nirapodclick.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:70465752929:android:e2d03cf966683697db3f20",
+        "android_client_info": {
+          "package_name": "com.example.nirapod_click"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "70465752929-p72gvrmfh97i9cmfdcal2rir9vl1o374.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.nirapod_click",
+            "certificate_hash": "5b7f7f4ffad34d6f57815fe680d78f743f8be560"
+          }
+        },
+        {
+          "client_id": "70465752929-7b4pglo57g9bmfd21nhoft8nkauegj37.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAZquOZq4Kvu2_gxg8B4IBwCL2OcvAPdTU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "70465752929-7b4pglo57g9bmfd21nhoft8nkauegj37.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "70465752929-o61epa7njfq9a8l759dde1lj3c9e5o0m.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.nirapodClick"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:70465752929:android:a1bfa6a86952538adb3f20",
+        "android_client_info": {
+          "package_name": "com.nirapodclick.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "70465752929-7b4pglo57g9bmfd21nhoft8nkauegj37.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAZquOZq4Kvu2_gxg8B4IBwCL2OcvAPdTU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "70465752929-7b4pglo57g9bmfd21nhoft8nkauegj37.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "70465752929-o61epa7njfq9a8l759dde1lj3c9e5o0m.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.nirapodClick"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,26 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "nirapodclick",
+          "appId": "1:70465752929:android:e2d03cf966683697db3f20",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "nirapodclick",
+          "configurations": {
+            "android": "1:70465752929:android:e2d03cf966683697db3f20",
+            "web": "1:70465752929:web:2cec8fd5fe092ca2db3f20"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}
