@@ -3,16 +3,16 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../services/auth_service.dart';
-import '../home/home_page.dart';
+import '../main/main_screen.dart';
 import 'login_page.dart';
 
 /// Listens to Firebase auth state and routes between [LoginPage] and
-/// [HomePage].
+/// [MainScreen].
 ///
 /// During the first frame we don't yet know who (if anyone) is signed in:
 /// Firebase has to rehydrate its cached session from disk. We show a
 /// branded splash instead of a plain spinner so the user never sees a
-/// half-loaded UI or a flash of LoginPage before HomePage.
+/// half-loaded UI or a flash of LoginPage before MainScreen.
 ///
 /// We also poll [_auth].currentUser directly so the splash can't get
 /// stuck if the auth-state stream fails to emit (e.g. a misconfigured
@@ -51,7 +51,7 @@ class _AuthGateState extends State<AuthGate> {
           return const _SplashScreen();
         }
         if (user == null) return const LoginPage();
-        return const HomePage();
+        return const MainScreen();
       },
     );
   }

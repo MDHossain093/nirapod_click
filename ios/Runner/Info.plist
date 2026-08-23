@@ -66,5 +66,15 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!--
+		Required by `image_picker` so iOS can show the system prompt
+		when the Screenshot Scanner opens the photo library.
+		Without these the app crashes the first time the user taps
+		"Choose screenshot".
+	-->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>NirapodClick needs access to your photos so the Screenshot Scanner can read text from a screenshot you choose.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>NirapodClick may save scanned screenshots back to your photo library.</string>
 </dict>
 </plist>

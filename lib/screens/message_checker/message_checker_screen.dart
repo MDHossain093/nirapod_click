@@ -4,8 +4,10 @@ import '../../core/locale/app_locale.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/risk_result.dart';
 import '../../services/checker_repository.dart';
-import '../../services/risk_engine.dart';
+import '../../services/hybrid_analyzer.dart';
 import '../history/risk_result_page.dart';
+import '../../widgets/ai_unavailable_banner.dart';
+import '../../widgets/risk_disclaimer.dart';
 
 /// Message Checker screen.
 ///
@@ -22,7 +24,7 @@ class MessageCheckerScreen extends StatefulWidget {
 
 class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
   final _ctrl = TextEditingController();
-  final _engine = RiskEngine();
+  final _analyzer = HybridAnalyzer();
   bool _busy = false;
   RiskResult? _result;
 
@@ -42,7 +44,7 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
     });
 
     try {
-      final result = _engine.analyzeMessage(text);
+      final result = await _analyzer.analyze(text);
       setState(() => _result = result);
 
       // Best-effort persist. A history-write hiccup should never block the
@@ -97,7 +99,7 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Paste the SMS, WhatsApp, or email below.',
+                      t('messageChecker.wording'),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: AppTheme.textSecondary,
                           ),
@@ -114,9 +116,8 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
                   textAlignVertical: TextAlignVertical.top,
                   keyboardType: TextInputType.multiline,
                   style: const TextStyle(fontSize: 15),
-                  decoration: const InputDecoration(
-                    hintText:
-                        'e.g. Your bKash account will be suspended. Send 5000 BDT to 017xx... to verify.',
+                  decoration: InputDecoration(
+                    hintText: t('messageChecker.hint'),
                   ),
                 ),
               ),
@@ -140,7 +141,7 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
                           ),
                         )
                       : const Icon(Icons.search),
-                  label: const Text('Analyze'),
+                  label: Text(t('messageChecker.analyze')),
                 ),
             ],
           ),
@@ -155,18 +156,23 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
   /// previous prototype rendered.
   Widget _buildResult(RiskResult result) {
     final style = RiskStyle.of(result.level);
+    final t = AppLocaleScope.of(context).tr;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (result.aiWasUnavailable) ...[
+          AiUnavailableBanner(text: t('result.aiUnavailable')),
+          const SizedBox(height: 12),
+        ],
         InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
           onTap: _openDetail,
           child: Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: style.color.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: style.color.withValues(alpha: 0.35)),
+              color: style.color.withValues(alpha: AppTheme.tintSurface),
+              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+              border: Border.all(color: style.color.withValues(alpha: AppTheme.tintBorder)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -186,7 +192,10 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
                     ),
                     const Spacer(),
                     Text(
-                      'Score ${result.score}/100',
+                      t('messageChecker.scoreLabel').replaceAll(
+                        '{score}',
+                        result.score.toString(),
+                      ),
                       style: const TextStyle(
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary,
@@ -196,7 +205,10 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Category: ${result.category}',
+                  t('messageChecker.categoryLabel').replaceAll(
+                    '{category}',
+                    result.category,
+                  ),
                   style: const TextStyle(
                     color: AppTheme.textPrimary,
                     fontWeight: FontWeight.w600,
@@ -204,18 +216,44 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Confidence: ${(result.confidence * 100).toStringAsFixed(0)}%',
+                  t('messageChecker.confidenceLabel').replaceAll(
+                    '{value}',
+                    (result.confidence * 100).toStringAsFixed(0),
+                  ),
                   style: const TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 13,
                   ),
                 ),
+                if (result.usedAi) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.secondary.withValues(
+                        alpha: 0.10,
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      t('messageChecker.aiBadge'),
+                      style: const TextStyle(
+                        color: AppTheme.secondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 10),
                 Row(
-                  children: const [
-                    Icon(Icons.touch_app_outlined, size: 16),
-                    SizedBox(width: 6),
-                    Text('Tap for full details'),
+                  children: [
+                    const Icon(Icons.touch_app_outlined, size: 16),
+                    const SizedBox(width: 6),
+                    Text(t('messageChecker.tapForDetails')),
                   ],
                 ),
               ],
@@ -231,8 +269,10 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
                   _ctrl.clear();
                 },
           icon: const Icon(Icons.refresh),
-          label: const Text('Check another'),
+          label: Text(t('messageChecker.checkAnother')),
         ),
+        const SizedBox(height: 12),
+        RiskDisclaimer(text: t('result.disclaimer')),
       ],
     );
   }

@@ -30,6 +30,39 @@ class AppTheme {
   static const Color riskHigh = Color(0xFFEA580C);    // orange
   static const Color riskCritical = Color(0xFFDC2626);// red
   static const Color danger = riskCritical;          // alias for colorScheme.error
+  static const Color success = riskLow;              // alias for "all-clear" UI
+  static const Color warning = riskMedium;           // alias for "watch-out" UI
+
+  // -- AI-unavailable banner palette --------------------------------------
+  // Soft amber surface used when the local rules verdict was shown because
+  // the Gemini fallback path was unavailable. Derived from [riskMedium] so
+  // the banner reads as "amber, not red" across the whole app.
+  static const Color amberBannerBackground = Color(0xFFFFF4D6);
+  static const Color amberBannerBorder = Color(0xFFE8B931);
+  static const Color amberBannerIcon = Color(0xFFB07A00);
+
+  // -- Design system tokens ----------------------------------------------
+  // Border-radius scale. Screens pick the radius that matches the
+  // surface's role; never use an off-scale value.
+  static const double radiusXs = 12;   // chips, source badges, URL preview
+  static const double radiusSm = 14;   // reason rows, meta cards, inline notice
+  static const double radiusMd = 16;   // safety notices, sub-panels
+  static const double radiusLg = 18;   // inline cards, list tiles
+  static const double radiusXl = 20;   // result cards, premium surfaces
+  static const double radiusXxl = 22;  // primary result header (URL/Phone)
+  static const double radiusHero = 24; // marketing hero cards
+
+  // Square tile sizes. Use to keep row + header icons consistent.
+  static const double tileIconSm = 44; // history rows
+  static const double tileIconMd = 52; // learn / check list rows
+  static const double tileIconLg = 64; // empty-state placeholders
+  static const double tileIconXl = 72; // result-header icon circle
+
+  // Tint alpha scale. Use to keep "level-tinted" surfaces consistent.
+  static const double tintSurface = 0.10; // colored card surface fill
+  static const double tintBorder = 0.25; // colored card border
+  static const double tintSubtle = 0.08; // primary-tinted row icon
+  static const double tintPanel = 0.06;  // primary-tinted reminder card
 
   // -- Hero gradient ------------------------------------------------------
   static const LinearGradient brandHeaderGradient = LinearGradient(

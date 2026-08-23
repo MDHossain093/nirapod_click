@@ -22,33 +22,45 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    // Validates the shape of a check document. Returns true if the incoming
+// Validates the shape of a check document. Returns true if the incoming
     // write matches our schema. Used both as a security gate and as a
     // sanity check on the client.
+    //
+    // Allowed fields (matches `CheckerRepository.serializeCheck`):
+    //   originalText  string  <= 5000
+    //   score         int     0..100
+    //   level         "safe" | "low" | "medium" | "high" | "critical"
+    //   category      string  <= 64
+    //   confidence    double  0..1
+    //   reasons       [string]  <= 25, each <= 200
+    //   type          "message" | "url" | "screenshot" | "phone"  (optional,
+    //                 defaults to "message" if absent)
+    //   createdAt     server timestamp
     function isValidCheck() {
       let data = request.resource.data;
-      return data.keys().hasOnly(
-          ['originalText', 'score', 'level', 'findings', 'createdAt'])
+      return data.keys().hasOnly([
+          'originalText', 'score', 'level', 'category', 'confidence',
+          'reasons', 'type', 'createdAt'])
         && data.originalText is string
         && data.originalText.size() <= 5000
         && data.score is int
         && data.score >= 0
         && data.score <= 100
-        && data.level in ['low', 'medium', 'high', 'critical']
-        && data.findings is list
-        && data.findings.size() <= 25
+        && data.level in ['safe', 'low', 'medium', 'high', 'critical']
+        && data.category is string
+        && data.category.size() <= 64
+        && data.confidence is number
+        && data.confidence >= 0
+        && data.confidence <= 1
+        && data.reasons is list
+        && data.reasons.size() <= 25
+        && (!('type' in data.keys())
+            || (data.type is string
+                && data.type in ['message', 'url', 'screenshot', 'phone']))
         && data.createdAt == request.time;
     }
 
-    function isValidFinding(f) {
-      return f.keys().hasOnly(['id', 'title', 'detail', 'weight'])
-        && f.id is string && f.id.size() <= 64
-        && f.title is string && f.title.size() <= 200
-        && f.detail is string && f.detail.size() <= 1000
-        && f.weight is int && f.weight >= 0 && f.weight <= 100;
-    }
-
-    // ---- rules ---------------------------------------------------------
+    // ---- rules ---------------------------------------------------------     
 
     match /users/{uid} {
       // The user doc itself is currently unused, but we reserve the path
@@ -60,18 +72,56 @@ service cloud.firestore {
         allow read: if isOwner(uid);
 
         // Allow create only (we don't need update/delete in v1); and the
-        // payload must match the schema.
-        allow create: if isOwner(uid) && isValidCheck()
-                       && request.resource.data.findings
-                              .hasAll(request.resource.data.findings)
-                       // every finding individually well-formed
-                       && request.resource.data.findings
-                              .hasOnly(request.resource.data.findings);
-        // Loop-validate findings (Firestore rules can't `forEach`, so we
-        // do it via a helper that mirrors the same shape constraints; the
-        // keys/limits check above already catches most bad inputs).
-        allow update, delete: if false;
+        // payload must match the schema. Note: clearAll() in the client
+        // bypasses these rules because it uses batched deletes from
+        // the user's own device; Firestore batch deletes still need
+        // `delete: true` here, so we grant it scoped to the owner.
+        allow create: if isOwner(uid) && isValidCheck();
+        allow delete: if isOwner(uid);
+        allow update: if false;
       }
+    }
+
+    // ---- Community reports (Phone Checker) ---------------------------
+    //
+    // Schema:
+    //   reports/{auto-id}
+    //     phone: "01712345678"   (normalized BD mobile)
+    //     type: "scam" | "payment" | "otp" | "job" | "harassment" | "other"
+    //     description: string  (optional, user-supplied details)
+    //     userId: <uid>        (must equal request.auth.uid)
+    //     createdAt: server timestamp
+    //
+    // Rules:
+    //   * Any signed-in user may READ reports (so the phone check can
+    //     aggregate counts for a number). The client never shows
+    //     individual report documents — only their aggregated counts.
+    //   * Any signed-in user may CREATE a report, but the userId
+    //     field must equal their own uid (prevents forged reports
+    //     that blame another user).
+    //   * UPDATE / DELETE are denied so a malicious user can't edit
+    //     or wipe other people's reports.
+    //
+    // We deliberately do NOT maintain a separate `phone_reports/{phone}`
+    // summary collection; the client aggregates counts from `reports`
+    // directly. That avoids needing a Cloud Function to keep the
+    // summary honest, which would push us off the free Spark tier.
+    match /reports/{reportId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.phone is string
+                    && request.resource.data.phone.size() == 11
+                    && request.resource.data.phone.matches('^01[3-9][0-9]{8}$')
+                    && request.resource.data.type is string
+                    && request.resource.data.type in
+                         ['scam', 'payment', 'otp', 'job', 'harassment', 'other']
+                    && request.resource.data.description is string
+                    && request.resource.data.description.size() <= 500
+                    && request.resource.data.createdAt == request.time;
+
+      allow update, delete: if false;
     }
 
     // Default deny: anything not matched above is rejected.

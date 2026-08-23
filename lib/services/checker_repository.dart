@@ -3,6 +3,18 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/risk_result.dart';
 
+/// What kind of scan produced this entry. Stored on the document so the
+/// history list can render the right icon/label without sniffing text.
+enum ScanType {
+  message,
+  url,
+  screenshot,
+  phone;
+
+  /// Stable wire name used in Firestore payloads + rules whitelist.
+  String get wire => name;
+}
+
 /// Limits that match `firestore.rules`. Kept in one place so the client
 /// and the server agree on what's valid.
 class CheckLimits {
@@ -13,7 +25,11 @@ class CheckLimits {
 }
 
 /// Pure helpers — kept top-level so they're unit-testable without Firebase.
-Map<String, dynamic> serializeCheck(RiskResult result, String originalText) {
+Map<String, dynamic> serializeCheck(
+  RiskResult result,
+  String originalText, {
+  ScanType type = ScanType.message,
+}) {
   final clampedText = originalText.length > CheckLimits.maxOriginalText
       ? originalText.substring(0, CheckLimits.maxOriginalText)
       : originalText;
@@ -37,6 +53,13 @@ Map<String, dynamic> serializeCheck(RiskResult result, String originalText) {
     'category': category,
     'confidence': result.confidence.clamp(0.0, 1.0),
     'reasons': reasons,
+    // Scan-type metadata. Older message-only docs without this field still
+    // deserialize cleanly (the history UI treats missing/null as 'message').
+    'type': type.wire,
+    // Surfaces "AI analysis unavailable" in the history detail UI when the
+    // original verdict came from the local fallback path. Older docs without
+    // this field deserialize cleanly (treated as `false`).
+    'aiWasUnavailable': result.aiWasUnavailable,
     // The server replaces this with serverTimestamp() on write; for
     // round-tripping via [deserializeCheck] outside of Firestore we use a
     // sentinel that means "now".
@@ -60,6 +83,9 @@ RiskResult deserializeCheck(Map<String, dynamic> data) {
     reasons: reasons,
     recommendations: const [],
     usedAi: false,
+    // Older docs (and unit tests that bypass Firestore) won't have this
+    // field set; default to `false` so they render as normal verdicts.
+    aiWasUnavailable: (data['aiWasUnavailable'] as bool?) ?? false,
   );
 }
 
@@ -70,7 +96,19 @@ class _Sentinel {
   static const Object createdAtNow = Object();
 }
 
-/// Saves user scans to Firestore and lists them back as [RiskResult]s.
+/// Parses the optional `type` field back to [ScanType]. Returns [ScanType.message]
+/// for unknown / missing values so legacy docs from before this field was
+/// added keep rendering.
+ScanType parseScanType(Object? raw) {
+  if (raw is String) {
+    for (final t in ScanType.values) {
+      if (t.wire == raw) return t;
+    }
+  }
+  return ScanType.message;
+}
+
+/// Saves user scans to Firestore and lists them back as [HistoryEntry]s.
 ///
 /// Schema (per scan):
 ///   users/{uid}/checks/{autoId}
@@ -80,6 +118,7 @@ class _Sentinel {
 ///     - category: string (<= 64)
 ///     - confidence: double (0..1)
 ///     - reasons: [string, ...] (<= 25, each <= 200)
+///     - type: "message" | "url" | "screenshot" | "phone" (optional, default 'message')
 ///     - createdAt: serverTimestamp
 class CheckerRepository {
   final FirebaseFirestore _db;
@@ -92,8 +131,20 @@ class CheckerRepository {
   CollectionReference<Map<String, dynamic>> get _checks =>
       _db.collection('users').doc(_uid).collection('checks');
 
-  Future<void> save(RiskResult result, String originalText) async {
-    final payload = serializeCheck(result, originalText);
+  /// Save a scan from the message / SMS checker (the only caller that used
+  /// to write). Kept as a thin alias for [saveScan] so older call sites keep
+  /// compiling.
+  Future<void> save(RiskResult result, String originalText) {
+    return saveScan(result: result, originalText: originalText);
+  }
+
+  /// Save any scan. [type] defaults to [ScanType.message].
+  Future<void> saveScan({
+    required RiskResult result,
+    required String originalText,
+    ScanType type = ScanType.message,
+  }) async {
+    final payload = serializeCheck(result, originalText, type: type);
     payload['createdAt'] = FieldValue.serverTimestamp();
     await _checks.add(payload);
   }
@@ -107,6 +158,27 @@ class CheckerRepository {
         .map((snap) => snap.docs.map(_fromDoc).toList());
   }
 
+  /// Delete every check this user has ever saved. Used by the
+  /// "Clear history" action on the history page. Batched in chunks of 450
+  /// because of Firestore's 500-op per-batch ceiling.
+  Future<int> clearAll() async {
+    final snap = await _checks.get();
+    if (snap.docs.isEmpty) return 0;
+
+    const chunkSize = 450;
+    var deleted = 0;
+    for (var i = 0; i < snap.docs.length; i += chunkSize) {
+      final end = (i + chunkSize).clamp(0, snap.docs.length);
+      final batch = _db.batch();
+      for (final doc in snap.docs.sublist(i, end)) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+      deleted += end - i;
+    }
+    return deleted;
+  }
+
   static HistoryEntry _fromDoc(
       QueryDocumentSnapshot<Map<String, dynamic>> d) {
     final data = d.data();
@@ -114,6 +186,7 @@ class CheckerRepository {
       result: deserializeCheck(data),
       originalText: (data['originalText'] as String?) ?? '',
       createdAt: data['createdAt'] as Object?,
+      type: parseScanType(data['type']),
     );
   }
 }
@@ -127,8 +200,10 @@ class HistoryEntry {
     required this.result,
     required this.originalText,
     this.createdAt,
+    this.type = ScanType.message,
   });
   final RiskResult result;
   final String originalText;
   final Object? createdAt;
+  final ScanType type;
 }

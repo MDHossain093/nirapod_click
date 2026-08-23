@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/locale/app_locale.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/risk_result.dart';
 import '../message_checker/message_checker_screen.dart';
+import '../../widgets/ai_unavailable_banner.dart';
+import '../../widgets/risk_disclaimer.dart';
 
 /// Full-detail page for a single [RiskResult].
 ///
@@ -33,6 +36,7 @@ class RiskResultPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = RiskStyle.of(result.level);
     final level = result.level;
+    final t = AppLocaleScope.of(context).tr;
 
     return Scaffold(
       appBar: AppBar(
@@ -48,6 +52,11 @@ class RiskResultPage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (result.aiWasUnavailable) ...[
+                AiUnavailableBanner(text: t('result.aiUnavailable')),
+                const SizedBox(height: 16),
+              ],
+
               // Verdict hero.
               Container(
                 padding: const EdgeInsets.all(24),
@@ -143,6 +152,35 @@ class RiskResultPage extends StatelessWidget {
                   ),
                 ],
               ),
+              if (result.usedAi) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.secondary.withValues(alpha: AppTheme.tintSurface),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+                    border: Border.all(
+                      color: AppTheme.secondary.withValues(alpha: AppTheme.tintSurface + 0.25),
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '\u2728 AI Analysis',
+                        style: TextStyle(
+                          color: AppTheme.secondary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
 
               // Reasons.
@@ -168,8 +206,8 @@ class RiskResultPage extends StatelessWidget {
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: AppTheme.surface,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFE5EAF1)),
+                      borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                      border: Border.all(color: AppTheme.borderSubtle),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -195,10 +233,10 @@ class RiskResultPage extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: AppTheme.riskLow.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(14),
+                    color: AppTheme.riskLow.withValues(alpha: AppTheme.tintSubtle),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                     border:
-                        Border.all(color: AppTheme.riskLow.withValues(alpha: 0.3)),
+                        Border.all(color: AppTheme.riskLow.withValues(alpha: AppTheme.tintBorder)),
                   ),
                   child: const Row(
                     children: [
@@ -227,10 +265,10 @@ class RiskResultPage extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: AppTheme.accent.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(14),
+                    color: AppTheme.accent.withValues(alpha: AppTheme.tintSurface),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                     border:
-                        Border.all(color: AppTheme.accent.withValues(alpha: 0.35)),
+                        Border.all(color: AppTheme.accent.withValues(alpha: AppTheme.tintBorder)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -316,6 +354,8 @@ class RiskResultPage extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 18),
+              RiskDisclaimer(text: t('result.disclaimer')),
             ],
           ),
         ),

@@ -47,7 +47,9 @@ const validCheck = {
   originalText: 'hello',
   score: 0,
   level: 'low',
-  findings: [],
+  category: 'General',
+  confidence: 0.5,
+  reasons: [],
   createdAt: { '.sv': 'timestamp' },
 };
 
@@ -96,14 +98,40 @@ describe('firestore.rules', () => {
     );
   });
 
-  test('all four valid levels are accepted', async () => {
+  test('all five valid levels are accepted', async () => {
     const db = await aliceDb();
-    for (const level of ['low', 'medium', 'high', 'critical']) {
+    for (const level of ['safe', 'low', 'medium', 'high', 'critical']) {
       const ok = { ...validCheck, level };
       await assertSucceeds(
         db.collection('users/alice/checks').add(ok),
       );
     }
+  });
+
+  test('all four scan types are accepted on create', async () => {
+    const db = await aliceDb();
+    for (const type of ['message', 'url', 'screenshot', 'phone']) {
+      const ok = { ...validCheck, type };
+      await assertSucceeds(
+        db.collection('users/alice/checks').add(ok),
+      );
+    }
+  });
+
+  test('unknown scan type is rejected', async () => {
+    const db = await aliceDb();
+    const bad = { ...validCheck, type: 'email' };
+    await assertFails(
+      db.collection('users/alice/checks').add(bad),
+    );
+  });
+
+  test('missing category is rejected', async () => {
+    const db = await aliceDb();
+    const { category, ...bad } = validCheck;
+    await assertFails(
+      db.collection('users/alice/checks').add(bad),
+    );
   });
 
   test('unknown top-level collection is denied', async () => {
@@ -113,10 +141,11 @@ describe('firestore.rules', () => {
     );
   });
 
-  test('update / delete on checks is denied (v1 is append-only)', async () => {
+  test('update is denied but delete is allowed (owner can clear history)', async () => {
     const db = await aliceDb();
     const ref = db.collection('users/alice/checks').doc('doc1');
     await assertFails(ref.update({ score: 99 }));
-    await assertFails(ref.delete());
+    await assertSucceeds(ref.set({ ...validCheck }));
+    await assertSucceeds(ref.delete());
   });
 });

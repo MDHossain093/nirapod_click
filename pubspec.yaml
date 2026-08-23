@@ -38,6 +38,19 @@ dependencies:
   firebase_auth: ^6.5.7
   cloud_firestore: ^6.8.0
   google_sign_in: ^6.2.1
+  http: ^1.2.2
+  flutter_dotenv: ^5.2.1
+
+  # Locale persistence — remembers the user's last English/Bangla
+  # choice across launches so the app opens in the right language.
+  shared_preferences: ^2.3.2
+
+  # Screenshot Scanner — on-device OCR + image picker.
+  # google_mlkit_text_recognition handles the OCR pipeline; image_picker
+  # is the gallery hand-off. Both are Android/iOS-only, which is fine
+  # because the target build is an Android APK.
+  google_mlkit_text_recognition: ^0.13.1
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:
@@ -69,6 +82,7 @@ flutter:
   assets:
     - assets/icon.png
     - assets/logo_full.png
+    - .env
 
   # To add assets to your application, add an assets section, like this:
   # assets:
