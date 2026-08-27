@@ -1,8 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/format.dart';
 import '../../core/locale/app_locale.dart';
+import '../../core/locale/localizer.dart';
 import '../../core/theme/app_theme.dart';
+import '../../services/alert_service.dart';
 import '../../services/checker_repository.dart';
 import 'risk_result_page.dart';
 
@@ -12,43 +15,48 @@ import 'risk_result_page.dart';
 /// in one timeline. Each row shows the risk color + badge, a small
 /// scan-type chip so the user can tell what kind of check it was,
 /// and the first line of the original text (truncated for privacy).
-class HistoryPage extends StatelessWidget {
+class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
+
+  @override
+  State<HistoryPage> createState() => _HistoryPageState();
+}
+
+class _HistoryPageState extends State<HistoryPage> {
+  /// Resolved at [initState] time and re-emitted by a [StreamBuilder]
+  /// so the underlying Firestore query always sees a fresh ID token.
+  /// The FlutterFire SDK refreshes tokens lazily, but the first read
+  /// after sign-in can race and return `permission-denied` because
+  /// the cached token is stale. Forcing one refresh here cures that
+  /// race without adding any UI cost (it happens once per page open,
+  /// typically < 200 ms).
+  Future<void>? _ready;
+
+  @override
+  void initState() {
+    super.initState();
+    _ready = _ensureFreshAuth();
+  }
+
+  Future<void> _ensureFreshAuth() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        debugPrint('[HistoryPage] No signed-in user; query will fail.');
+        return;
+      }
+      debugPrint('[HistoryPage] Forcing fresh ID token for uid=${user.uid}.');
+      await user.getIdToken(true);
+      debugPrint('[HistoryPage] ID token refreshed.');
+    } catch (e) {
+      // Don't block the UI on a refresh failure — the underlying
+      // stream will surface the real error if it still matters.
+      debugPrint('[HistoryPage] Token refresh failed: $e');
+    }
+  }
 
   String _tr(BuildContext context, String key) =>
       AppLocaleScope.of(context).tr(key);
-
-  String _dateLabel(DateTime? ts) {
-    if (ts == null) return 'just now';
-    final now = DateTime.now();
-    final diff = now.difference(ts);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    if (diff.inDays < 7) return '${diff.inDays}d ago';
-    final y = ts.year.toString().padLeft(4, '0');
-    final m = ts.month.toString().padLeft(2, '0');
-    final d = ts.day.toString().padLeft(2, '0');
-    return '$y-$m-$d';
-  }
-
-  /// Per-scan-type icon + localized label key, in one place so the
-  /// list and any future detail view stay in sync.
-  ({IconData icon, String labelKey}) _typeMeta(ScanType t) {
-    switch (t) {
-      case ScanType.message:
-        return (icon: Icons.chat_bubble_outline, labelKey: 'history.typeMessage');
-      case ScanType.url:
-        return (icon: Icons.link_rounded, labelKey: 'history.typeUrl');
-      case ScanType.screenshot:
-        return (
-          icon: Icons.image_outlined,
-          labelKey: 'history.typeScreenshot',
-        );
-      case ScanType.phone:
-        return (icon: Icons.phone_outlined, labelKey: 'history.typePhone');
-    }
-  }
 
   Future<void> _confirmClear(BuildContext context) async {
     final confirmed = await showDialog<bool>(
@@ -76,6 +84,11 @@ class HistoryPage extends StatelessWidget {
     final repo = CheckerRepository();
     try {
       await repo.clearAll();
+      // Wipe the seen-IDs set so the alert badge doesn't ghost-count
+      // alerts whose underlying documents just got deleted. Without
+      // this, an alert could remain "unread" forever even though its
+      // doc is gone (and would therefore never appear again).
+      await AlertService.instance.clearSeen();
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(_tr(context, 'history.clearedToast'))),
@@ -101,24 +114,40 @@ class HistoryPage extends StatelessWidget {
             onPressed: () => _confirmClear(context),
           ),
         ],
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: AppTheme.headerGradient,
+          ),
+        ),
       ),
-      body: StreamBuilder<List<HistoryEntry>>(
-        stream: CheckerRepository().watchRecent(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+      body: FutureBuilder<void>(
+        future: _ready,
+        builder: (context, readySnap) {
+          // While the ID token is being refreshed we keep showing the
+          // spinner — the underlying Firestore stream opens only after
+          // the refresh resolves, so it can use a guaranteed-fresh
+          // token. This eliminates the "stale token → permission-denied
+          // on first read after sign-in" race.
+          if (readySnap.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  'Could not load history.\n${snapshot.error}',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            );
-          }
+          return StreamBuilder<List<HistoryEntry>>(
+            stream: CheckerRepository().watchRecent(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'Could not load history.\n${snapshot.error}',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                );
+              }
           final checks = snapshot.data ?? const <HistoryEntry>[];
           if (checks.isEmpty) {
             return Center(
@@ -153,17 +182,14 @@ class HistoryPage extends StatelessWidget {
             );
           }
           return ListView.separated(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             itemCount: checks.length,
             separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (context, i) {
               final entry = checks[i];
               final result = entry.result;
               final style = RiskStyle.of(result.level);
-              final createdAt = entry.createdAt is Timestamp
-                  ? (entry.createdAt as Timestamp).toDate()
-                  : null;
-              final typeMeta = _typeMeta(entry.type);
+              final typeMeta = scanTypeMeta(entry.type);
               return Material(
                 color: AppTheme.surface,
                 borderRadius: BorderRadius.circular(AppTheme.radiusSm),
@@ -171,7 +197,10 @@ class HistoryPage extends StatelessWidget {
                   borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => RiskResultPage(result: result),
+                      builder: (_) => RiskResultPage(
+                        result: result,
+                        originalText: entry.originalText,
+                      ),
                     ),
                   ),
                   child: Container(
@@ -188,7 +217,7 @@ class HistoryPage extends StatelessWidget {
                           height: 44,
                           decoration: BoxDecoration(
                             color: style.color.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                           ),
                           child: Icon(style.icon, color: style.color),
                         ),
@@ -199,39 +228,59 @@ class HistoryPage extends StatelessWidget {
                             children: [
                               Row(
                                 children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: style.color,
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      style.badge,
-                                      style: TextStyle(
-                                        color: style.onColor,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 10,
-                                        letterSpacing: 0.8,
-                                      ),
+                                  // Risk pill + scan-type chip pinned
+                                  // together on the left via a tight
+                                  // inner Row that wraps if needed. The
+                                  // date goes in a Flexible after, so
+                                  // any long localized date string
+                                  // (e.g. Bangla "২ ঘন্টা আগে") can
+                                  // ellipsize without pushing the row
+                                  // past the screen edge.
+                                  Flexible(
+                                    child: Wrap(
+                                      spacing: 8,
+                                      runSpacing: 4,
+                                      crossAxisAlignment: WrapCrossAlignment.center,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: style.color,
+                                            borderRadius:
+                                                BorderRadius.circular(
+                                                    AppTheme.radiusXs),
+                                          ),
+                                          child: Text(
+                                            result.level.localizedBadge,
+                                            style: TextStyle(
+                                              color: style.onColor,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 10,
+                                              letterSpacing: 0.8,
+                                            ),
+                                          ),
+                                        ),
+                                        _ScanTypeChip(
+                                          icon: typeMeta.icon,
+                                          label: _tr(context, typeMeta.labelKey),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  // Scan-type chip: keeps message/url/
-                                  // screenshot/phone rows visually
-                                  // distinguishable at a glance.
-                                  _ScanTypeChip(
-                                    icon: typeMeta.icon,
-                                    label: _tr(context, typeMeta.labelKey),
-                                  ),
-                                  const Spacer(),
-                                  Text(
-                                    _dateLabel(createdAt),
-                                    style: const TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 12,
+                                  Flexible(
+                                    child: Text(
+                                      relativeDateLabel(entry.createdAt),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.end,
+                                      style: const TextStyle(
+                                        color: AppTheme.textSecondary,
+                                        fontSize: 12,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -253,15 +302,17 @@ class HistoryPage extends StatelessWidget {
                                 style: const TextStyle(
                                   color: AppTheme.textPrimary,
                                   fontSize: 14,
-                                  height: 1.3,
+                                  height: 1.4,
                                 ),
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'score ${result.score} \u00b7 '
-                                '${(result.confidence * 100).toStringAsFixed(0)}% '
-                                '\u00b7 ${result.reasons.length} '
+                                'score ${AppLocaleScope.of(context).formatNumber(result.score)} \u00b7 '
+                                '${AppLocaleScope.of(context).formatPercent(result.confidence)} '
+                                '\u00b7 ${AppLocaleScope.of(context).formatNumber(result.reasons.length)} '
                                 'signal${result.reasons.length == 1 ? "" : "s"}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   color: AppTheme.textSecondary,
                                   fontSize: 12,
@@ -282,11 +333,14 @@ class HistoryPage extends StatelessWidget {
               );
             },
           );
+          },
+          );
         },
-      ),
+        ),
     );
   }
 }
+
 
 /// Tiny pill that renders the scan type next to the risk badge.
 /// Kept private to the page since it's a 1:1 visual companion.
@@ -302,15 +356,25 @@ class _ScanTypeChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: AppTheme.primary.withValues(alpha: AppTheme.tintSubtle),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppTheme.radiusXs),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      // Wrap (not Row) so when the outer Wrap constrains the chip
+      // tighter than its intrinsic width — e.g. the long Bangla /
+      // English "Phone Number" label fitting next to a high-risk
+      // badge on a narrow row — the icon + label can break onto two
+      // lines instead of overflowing the chip's horizontal bound
+      // (which used to throw a RenderFlex overflow assertion at run
+      // time on phone-number scan history rows).
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 0,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           Icon(icon, size: 12, color: AppTheme.primary),
-          const SizedBox(width: 4),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: AppTheme.primary,
               fontSize: 11,

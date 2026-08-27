@@ -17,6 +17,12 @@ class AppTheme {
   static const Color secondary = Color(0xFF0E9F8A);  // Teal
   static const Color accent = Color(0xFFF4B942);     // Amber
 
+  // -- Upsell / accent gradient highlight --------------------------------
+  // Lighter amber used as the secondary stop in the Go Premium gradient
+  // banner on the home screen. Pairs with [accent] for a warm, premium
+  // feel without introducing a new brand hue.
+  static const Color premiumBannerHighlight = Color(0xFFFFD789);
+
   // -- Backgrounds & text -------------------------------------------------
   static const Color background = Color(0xFFF7F9FC);
   static const Color surface = Colors.white;
@@ -53,6 +59,7 @@ class AppTheme {
   static const double radiusHero = 24; // marketing hero cards
 
   // Square tile sizes. Use to keep row + header icons consistent.
+  static const double tileIconXs = 40; // inline icon discs (phone result, lesson shield)
   static const double tileIconSm = 44; // history rows
   static const double tileIconMd = 52; // learn / check list rows
   static const double tileIconLg = 64; // empty-state placeholders
@@ -73,6 +80,16 @@ class AppTheme {
       Color(0xFF1B4D7A),
       secondary,
     ],
+  );
+
+  // -- Page header gradient -----------------------------------------------
+  // 2-stop [primary -> secondary] gradient applied to every AppBar and
+  // in-page header zone across the post-login app. Use this for any new
+  // page-level header card so the visual language stays consistent.
+  static const LinearGradient headerGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [primary, secondary],
   );
 
   // -- Material 3 light theme --------------------------------------------

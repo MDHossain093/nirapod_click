@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/locale/app_locale.dart';
+import '../../core/locale/localizer.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/risk_result.dart';
 import '../message_checker/message_checker_screen.dart';
@@ -11,24 +12,69 @@ import '../../widgets/risk_disclaimer.dart';
 /// Full-detail page for a single [RiskResult].
 ///
 /// Reached either from the Message Checker inline card or from the
-/// History list. Shows the verdict, category, confidence, reasons, and
-/// level-keyed safety recommendations.
+/// History / Alerts list. Shows the verdict, category, confidence,
+/// reasons, and level-keyed safety recommendations.
+///
+/// `originalText` is the raw input that produced [result]. It's
+/// optional because the inline message-checker flow already has the
+/// text on screen — there it's redundant. The history and alerts
+/// entry points pass it in so users can review what they scanned
+/// without going back to the source app.
+///
+/// Static labels (category / confidence / safety tips / app-bar /
+/// buttons) come from `AppLocaleScope.of(context).tr(...)` — that's
+/// the widget-tree-aware path. The verdict headline uses
+/// [Localizer.instance.tr] because it depends only on the active
+/// locale, not on any visible ancestor.
 class RiskResultPage extends StatelessWidget {
-  const RiskResultPage({super.key, required this.result});
+  const RiskResultPage({
+    super.key,
+    required this.result,
+    this.originalText,
+  });
   final RiskResult result;
 
+  /// The raw input that produced [result]. `null` means "don't render
+  /// the original-text panel" (e.g. the inline message-checker flow
+  /// where the text is already on the previous screen).
+  final String? originalText;
+
+  /// Headline shown under the level chip. Resolved via the context-free
+  /// [Localizer] singleton so the page doesn't have to thread the locale
+  /// down through every helper.
   String _headline(RiskLevel level) {
+    final loc = Localizer.instance;
     switch (level) {
       case RiskLevel.safe:
-        return 'Looks safe';
+        return loc.tr('level.safe');
       case RiskLevel.low:
-        return 'Be cautious';
+        return loc.tr('level.low');
       case RiskLevel.medium:
-        return 'Potentially suspicious';
+        return loc.tr('level.medium');
       case RiskLevel.high:
-        return 'High risk';
+        return loc.tr('level.high');
       case RiskLevel.critical:
-        return 'Critical warning';
+        return loc.tr('level.critical');
+    }
+  }
+
+  /// Localized badge label (SAFE / LOW RISK / etc). `RiskStyle.badge`
+  /// is hardcoded English today; overriding it here lets the chip
+  /// render in Bangla while every other consumer of [RiskStyle.badge]
+  /// keeps working unchanged.
+  String _localizedBadge(RiskLevel level) {
+    final loc = Localizer.instance;
+    switch (level) {
+      case RiskLevel.safe:
+        return loc.tr('badge.safe');
+      case RiskLevel.low:
+        return loc.tr('badge.low');
+      case RiskLevel.medium:
+        return loc.tr('badge.medium');
+      case RiskLevel.high:
+        return loc.tr('badge.high');
+      case RiskLevel.critical:
+        return loc.tr('badge.critical');
     }
   }
 
@@ -36,14 +82,16 @@ class RiskResultPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = RiskStyle.of(result.level);
     final level = result.level;
-    final t = AppLocaleScope.of(context).tr;
+    final locale = AppLocaleScope.of(context);
+    final t = locale.tr;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Result'),
+        title: Text(t('result.label.appBarTitle')),
         flexibleSpace: Container(
-          decoration:
-              const BoxDecoration(gradient: AppTheme.brandHeaderGradient),
+          decoration: const BoxDecoration(
+            gradient: AppTheme.headerGradient,
+          ),
         ),
       ),
       body: SafeArea(
@@ -84,7 +132,9 @@ class RiskResultPage extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      style.badge,
+                      _localizedBadge(level),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 12,
@@ -96,6 +146,8 @@ class RiskResultPage extends StatelessWidget {
                     Text(
                       _headline(level),
                       textAlign: TextAlign.center,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 22,
@@ -116,11 +168,18 @@ class RiskResultPage extends StatelessWidget {
                           const Icon(Icons.speed,
                               size: 16, color: Colors.white),
                           const SizedBox(width: 6),
-                          Text(
-                            'Risk score: ${result.score} / 100',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
+                          Flexible(
+                            child: Text(
+                              t('result.label.score').replaceAll(
+                                '{score}',
+                                locale.formatNumber(result.score),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ],
@@ -137,7 +196,7 @@ class RiskResultPage extends StatelessWidget {
                   Expanded(
                     child: _metaCard(
                       icon: Icons.category_outlined,
-                      label: 'Category',
+                      label: t('result.label.category'),
                       value: result.category,
                     ),
                   ),
@@ -145,9 +204,8 @@ class RiskResultPage extends StatelessWidget {
                   Expanded(
                     child: _metaCard(
                       icon: Icons.verified_outlined,
-                      label: 'Confidence',
-                      value:
-                          '${(result.confidence * 100).toStringAsFixed(0)}%',
+                      label: t('result.label.confidence'),
+                      value: locale.formatPercent(result.confidence),
                     ),
                   ),
                 ],
@@ -166,12 +224,12 @@ class RiskResultPage extends StatelessWidget {
                       color: AppTheme.secondary.withValues(alpha: AppTheme.tintSurface + 0.25),
                     ),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '\u2728 AI Analysis',
-                        style: TextStyle(
+                        t('result.label.aiBadge'),
+                        style: const TextStyle(
                           color: AppTheme.secondary,
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -183,6 +241,50 @@ class RiskResultPage extends StatelessWidget {
               ],
               const SizedBox(height: 24),
 
+              // Original input (only when the caller passed it in).
+              // Renders above the reasons so the user can re-read what
+              // they scanned before reading the verdict's explanation.
+              if (originalText != null && originalText!.isNotEmpty) ...[
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.subject_rounded,
+                      color: AppTheme.secondary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      t('result.originalHeader'),
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius:
+                        BorderRadius.circular(AppTheme.radiusSm),
+                    border: Border.all(color: AppTheme.borderSubtle),
+                  ),
+                  child: Text(
+                    originalText!,
+                    style: const TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+              ],
+
               // Reasons.
               if (result.reasons.isNotEmpty) ...[
                 Row(
@@ -190,7 +292,10 @@ class RiskResultPage extends StatelessWidget {
                     Icon(Icons.flag_outlined, color: style.color, size: 20),
                     const SizedBox(width: 8),
                     Text(
-                      'What we found (${result.reasons.length})',
+                      t('result.label.whatWeFound').replaceAll(
+                        '{count}',
+                        locale.formatNumber(result.reasons.length),
+                      ),
                       style: const TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.bold,
@@ -238,16 +343,15 @@ class RiskResultPage extends StatelessWidget {
                     border:
                         Border.all(color: AppTheme.riskLow.withValues(alpha: AppTheme.tintBorder)),
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
-                      Icon(Icons.verified_outlined,
+                      const Icon(Icons.verified_outlined,
                           color: AppTheme.riskLow, size: 28),
-                      SizedBox(width: 12),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'No scam signals were detected. Stay alert - always verify '
-                          'unexpected payment or login requests.',
-                          style: TextStyle(
+                          t('result.label.noSignals'),
+                          style: const TextStyle(
                             color: AppTheme.textPrimary,
                             fontSize: 14,
                             height: 1.4,
@@ -273,14 +377,14 @@ class RiskResultPage extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Row(
+                      Row(
                         children: [
-                          Icon(Icons.tips_and_updates_outlined,
+                          const Icon(Icons.tips_and_updates_outlined,
                               color: AppTheme.accent),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Text(
-                            'Safety tips',
-                            style: TextStyle(
+                            t('result.label.safetyTips'),
+                            style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               color: AppTheme.textPrimary,
                             ),
@@ -307,7 +411,7 @@ class RiskResultPage extends StatelessWidget {
                                   style: const TextStyle(
                                     color: AppTheme.textPrimary,
                                     fontSize: 13,
-                                    height: 1.35,
+                                    height: 1.4,
                                   ),
                                 ),
                               ),
@@ -326,7 +430,7 @@ class RiskResultPage extends StatelessWidget {
                     child: OutlinedButton.icon(
                       onPressed: () => Navigator.of(context).pop(),
                       icon: const Icon(Icons.arrow_back),
-                      label: const Text('Back'),
+                      label: Text(t('result.label.back')),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -339,7 +443,7 @@ class RiskResultPage extends StatelessWidget {
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: const Text('Report copied to clipboard'),
+                            content: Text(t('result.label.copied')),
                             backgroundColor: AppTheme.secondary,
                             behavior: SnackBarBehavior.floating,
                             shape: RoundedRectangleBorder(
@@ -349,7 +453,7 @@ class RiskResultPage extends StatelessWidget {
                         );
                       },
                       icon: const Icon(Icons.copy_all_outlined, size: 18),
-                      label: const Text('Copy report'),
+                      label: Text(t('result.label.copy')),
                     ),
                   ),
                 ],
@@ -377,16 +481,24 @@ class RiskResultPage extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
               Icon(icon, size: 16, color: AppTheme.secondary),
               const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
+              // Localized labels (especially Bangla) can grow longer
+              // than the icon + 6px gap leaves room for — without an
+              // Expanded + ellipsis here the row overflows by N pixels.
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                  ),
                 ),
               ),
             ],
@@ -394,6 +506,8 @@ class RiskResultPage extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: AppTheme.textPrimary,
               fontWeight: FontWeight.bold,

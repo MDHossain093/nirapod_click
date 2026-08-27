@@ -73,9 +73,15 @@ extension PhoneRiskResultAdapter on PhoneRiskResult {
         orElse: () => RiskLevel.low,
       ),
       score: score,
+      // Phone engine is fully deterministic (no AI, no probabilistic
+      // classifier), so unreported phones are treated as fully confident
+      // — this is the honest signal to the alert gate. With non-zero
+      // reports the 0.5 + reportCount/20 ramp still applies; a phone
+      // with 6+ community reports already lands at confidence >= 0.8
+      // and passes the gate on its own.
       confidence: reportCount > 0
           ? (0.5 + (reportCount / 20.0)).clamp(0.0, 1.0)
-          : 0.5,
+          : 1.0,
       reasons: reasons,
       recommendations: recommendations,
       category: fallbackCategory,

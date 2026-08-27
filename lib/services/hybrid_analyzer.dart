@@ -1,14 +1,22 @@
 import '../models/risk_result.dart';
 import 'ai_service.dart';
 import 'risk_engine.dart';
+import 'scam_rule_service.dart';
 
 class HybridAnalyzer {
-  final RiskEngine _riskEngine = RiskEngine();
-  final AiService _aiService = AiService();
+  HybridAnalyzer({AiService? aiService})
+      : _aiService = aiService ?? AiService();
+
+  final AiService _aiService;
 
   Future<RiskResult> analyze(String message) async {
-    final ruleResult =
-        _riskEngine.analyzeMessage(message);
+    // Resolve the rule bundle lazily on every analyze call so that
+    // hot-restart and code-push scenarios where [ScamRuleService] is
+    // re-seeded mid-session still pick up the latest bundle.
+    // The getter is O(1) (cache hit after first load).
+    final ruleResult = RiskEngine(
+      rules: ScamRuleService.instance.rules,
+    ).analyzeMessage(message);
 
     // Clear result → don't use Gemini
     if (ruleResult.confidence >= 0.80) {

@@ -177,4 +177,176 @@ void main() {
       expect(r.score, greaterThanOrEqualTo(20));
     });
   });
+
+  // ─── Newly added list coverage ─────────────────────────────────────
+  //
+  // Guards the BD rule-engine strengthening change. Each test exercises
+  // ONE of the four extended hardcoded lists in `url_risk_engine.dart`
+  // so a future refactor cannot silently drop the new entries.
+
+  group('newly added URL list coverage', () {
+    test('dangerous extension .pdf is flagged', () {
+      const url = 'http://bkash-claim.example.top/invoice.pdf';
+      final r = engine.analyze(url);
+
+      expect(
+        r.reasons,
+        contains(
+          matches(RegExp(r'downloadable executable file.*\.pdf')),
+        ),
+        reason: '.pdf must trip the dangerous-extension rule',
+      );
+      expect(r.score, greaterThanOrEqualTo(20));
+    });
+
+    test('dangerous extension .doc is flagged', () {
+      const url = 'http://verify-account.example.top/KYC_Form.doc';
+      final r = engine.analyze(url);
+
+      expect(
+        r.reasons,
+        contains(
+          matches(RegExp(r'downloadable executable file.*\.doc')),
+        ),
+        reason: '.doc must trip the dangerous-extension rule (macro vector)',
+      );
+    });
+
+    test('suspicious TLD .work is flagged', () {
+      const url = 'https://easy-money-claim.example.work/login';
+      final r = engine.analyze(url);
+
+      expect(
+        r.reasons,
+        contains(
+          matches(RegExp(r'frequently-abused top-level domain.*\.work')),
+        ),
+        reason: '.work must surface as a suspicious-TLD signal',
+      );
+      expect(r.score, greaterThanOrEqualTo(15));
+    });
+
+    test('suspicious TLD .loan is flagged', () {
+      const url = 'https://quick-loan.example.loan/apply';
+      final r = engine.analyze(url);
+
+      expect(
+        r.reasons,
+        contains(
+          matches(RegExp(r'frequently-abused top-level domain.*\.loan')),
+        ),
+        reason: '.loan must surface as a suspicious-TLD signal',
+      );
+    });
+
+    test('Bangla phishing keyword লগইন is flagged', () {
+      const url = 'https://example.com/লগইন';
+      final r = engine.analyze(url);
+
+      expect(
+        r.reasons
+            .where((s) =>
+                s.toLowerCase().contains('phishing-related') ||
+                s.toLowerCase().contains('sensitive'))
+            .toList(),
+        isNotEmpty,
+        reason: 'Bangla login keyword must trip the phishing-keyword rule',
+      );
+      expect(r.score, greaterThanOrEqualTo(15));
+    });
+
+    test('BD bank IBL brand impersonation is flagged', () {
+      const url = 'http://verify-account.example.tk/ibl-login';
+      final r = engine.analyze(url);
+
+      expect(
+        r.reasons
+            .where((s) => s.toLowerCase().contains('brand'))
+            .toList(),
+        isNotEmpty,
+        reason: 'ibl bank name should trip the brand-impersonation rule',
+      );
+    });
+
+    test('BD bank EBL brand impersonation is flagged', () {
+      const url = 'http://secure-update.example.tk/ebl-verify';
+      final r = engine.analyze(url);
+
+      expect(
+        r.reasons
+            .where((s) => s.toLowerCase().contains('brand'))
+            .toList(),
+        isNotEmpty,
+        reason: 'ebl bank name should trip the brand-impersonation rule',
+      );
+    });
+
+    test('foreign scam TLD (.ng) soft penalty fires only with another signal',
+        () {
+      // Bare .ng alone must NOT fire the offshore penalty (legitimate
+      // diaspora use case). Pair it with a phishing keyword so the
+      // soft-penalty clause activates.
+      const legitNg = 'https://example.ng';
+      const dirtyNg = 'https://example.ng/login';
+
+      final legit = engine.analyze(legitNg);
+      final dirty = engine.analyze(dirtyNg);
+
+      expect(
+        legit.reasons.any((s) => s.toLowerCase().contains('offshore')),
+        isFalse,
+        reason: 'plain .ng alone must not trip the offshore penalty',
+      );
+      expect(
+        dirty.reasons.any((s) => s.toLowerCase().contains('offshore')),
+        isTrue,
+        reason: '.ng + phishing keyword must trip the offshore penalty',
+      );
+    });
+  });
+
+  // ─── Confidence gate ───────────────────────────────────────────────
+  //
+  // Mirrors the message-engine gate: a single high-impact signal at
+  // score ≥ 80 (critical tier) with at least one reason must clear
+  // the 0.80 AI gate so obvious scam URLs resolve locally.
+
+  group('confidence gate', () {
+    test('critical-tier URL clears the AI gate (confidence >= 0.80)', () {
+      // Stack enough signals to push the score into the critical band:
+      //   - http://          (+10  Security)
+      //   - .tk TLD          (+15  Suspicious Domain)
+      //   - .apk extension   (+20  Suspicious URL)
+      //   - login keyword    (+15  Phishing)
+      //   - bkash brand      (+10  Impersonation)
+      //   - phishing+brand   (+15  Impersonation combo)
+      //   = 85 → critical
+      const url =
+          'http://bkash-login-verify.example.tk/account.apk?reward=claim';
+      final r = engine.analyze(url);
+
+      expect(r.level, UrlRiskLevel.critical);
+      expect(r.score, greaterThanOrEqualTo(80));
+      expect(
+        r.confidence,
+        greaterThanOrEqualTo(0.80),
+        reason: 'critical-tier URL must clear the 0.80 AI gate locally',
+      );
+    });
+
+    test('single low-signal URL stays below the AI gate', () {
+      // A clean https URL with only a single keyword hit must NOT
+      // auto-pass — should keep going to AI for confirmation.
+      const url = 'https://example.com/login';
+      final r = engine.analyze(url);
+
+      if (r.score < 80) {
+        expect(
+          r.confidence,
+          lessThan(0.80),
+          reason: 'single-signal URL must NOT auto-pass the AI gate',
+        );
+      }
+    });
+  });
 }

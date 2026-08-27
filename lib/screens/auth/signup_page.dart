@@ -294,18 +294,43 @@ class _SignUpForm extends StatelessWidget {
             },
           ),
           const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: anyBusy ? null : onSubmitEmail,
-            child: busy
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Text('Create Account'),
+          // Brand-gradient primary CTA — same `primary → secondary`
+          // gradient used by the in-app AppBar / Subscription card /
+          // Home "Go Premium" banner. See login_page.dart for the
+          // wrapping pattern (transparent button + gradient container).
+          Container(
+            decoration: BoxDecoration(
+              gradient: AppTheme.headerGradient,
+              borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            ),
+            child: ElevatedButton(
+              onPressed: anyBusy ? null : onSubmitEmail,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.white,
+                shadowColor: Colors.transparent,
+                disabledBackgroundColor: Colors.transparent,
+                disabledForegroundColor: Colors.white70,
+                minimumSize: const Size(double.infinity, 52),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              child: busy
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Create Account'),
+            ),
           ),
           if (error != null) ...[
             const SizedBox(height: 16),
@@ -326,10 +351,10 @@ class _SignUpForm extends StatelessWidget {
             label: const Text('Continue with Google'),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 14),
-              foregroundColor: const Color(0xFF172033),
-              side: const BorderSide(color: Color(0xFFD7DEE8), width: 1.2),
+              foregroundColor: AppTheme.textPrimary,
+              side: const BorderSide(color: AppTheme.borderSubtle, width: 1.2),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
               ),
             ),
           ),
@@ -337,9 +362,15 @@ class _SignUpForm extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text(
-                'Already have an account? ',
-                style: TextStyle(color: AppTheme.textSecondary),
+              // See login_page.dart — same overflow guard for the
+              // localized Bangla copy.
+              Flexible(
+                child: const Text(
+                  'Already have an account? ',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
               ),
               TextButton(
                 onPressed: anyBusy ? null : () => Navigator.of(context).pop(),

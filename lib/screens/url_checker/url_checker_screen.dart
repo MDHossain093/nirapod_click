@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/locale/app_locale.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/risk_result.dart';
 import '../../models/url_risk_result.dart';
 import '../../services/checker_repository.dart';
+import '../../services/free_quota_service.dart';
 import '../../services/url_hybrid_analyzer.dart';
 import '../../widgets/ai_unavailable_banner.dart';
+import '../../widgets/quota_exhausted_dialog.dart';
 import '../../widgets/risk_disclaimer.dart';
 
 /// URL Checker screen.
@@ -52,6 +53,16 @@ class _UrlCheckerScreenState
       return;
     }
 
+    // Free-tier gate. Premium users always pass through. Free users
+    // see the upgrade sheet when their monthly budget is gone.
+    final quota = FreeQuotaScope.of(context);
+    final allowed = await quota.consume();
+    if (!allowed) {
+      if (!mounted) return;
+      await QuotaExhaustedSheet.show(context);
+      return;
+    }
+
     setState(() {
       _isChecking = true;
       _result = null;
@@ -86,19 +97,6 @@ class _UrlCheckerScreenState
     }
   }
 
-  Future<void> _pasteUrl() async {
-    final clipboard =
-        await Clipboard.getData(
-      Clipboard.kTextPlain,
-    );
-
-    if (clipboard?.text != null) {
-      setState(() {
-        _controller.text = clipboard!.text!;
-      });
-    }
-  }
-
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
@@ -114,6 +112,11 @@ class _UrlCheckerScreenState
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: Text(_tr('urlChecker.appBarTitle')),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: AppTheme.headerGradient,
+          ),
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -137,7 +140,7 @@ class _UrlCheckerScreenState
                 _tr('urlChecker.subheading'),
                 style: const TextStyle(
                   color: AppTheme.textSecondary,
-                  height: 1.5,
+                  height: 1.4,
                 ),
               ),
 
@@ -159,40 +162,65 @@ class _UrlCheckerScreenState
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _pasteUrl,
-                      icon: const Icon(
-                        Icons.content_paste_rounded,
+                    child: Container(
+                      height: 48,
+                      decoration: BoxDecoration(
+                        // Brand header gradient token — same
+                        // `primary → secondary` as the AppBar +
+                        // Go Premium + Profile upsell CTAs.
+                        gradient: AppTheme.headerGradient,
+                        borderRadius: BorderRadius.circular(AppTheme.radiusXs),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.primary.withValues(alpha: 0.25),
+                            blurRadius: 12,
+                            offset: const Offset(0, 5),
+                          ),
+                        ],
                       ),
-                      label: Text(
-                        _tr('urlChecker.paste'),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(width: 12),
-
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed:
-                          _isChecking ? null : _checkUrl,
-                      icon: _isChecking
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child:
-                                  CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(
-                              Icons.security_rounded,
-                            ),
-                      label: Text(
-                        _isChecking
-                            ? _tr('urlChecker.checking')
-                            : _tr('urlChecker.check'),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(AppTheme.radiusXs),
+                          onTap:
+                              _isChecking ? null : _checkUrl,
+                          child: Center(
+                            child: _isChecking
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.4,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.center,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.security_rounded,
+                                        color: Colors.white,
+                                        size: 18,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        _tr('urlChecker.check'),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight:
+                                              FontWeight.w700,
+                                          color: Colors.white,
+                                          letterSpacing: 0.2,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -202,7 +230,7 @@ class _UrlCheckerScreenState
               const SizedBox(height: 28),
 
               if (_result != null)
-                _buildResult(_result!),
+                _buildResult(context, _result!),
 
               const SizedBox(height: 24),
 
@@ -214,14 +242,14 @@ class _UrlCheckerScreenState
     );
   }
 
-  Widget _buildResult(UrlRiskResult result) {
+  Widget _buildResult(BuildContext context, UrlRiskResult result) {
     final color = _getColor(result.level);
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
         border: Border.all(
           color: color.withValues(alpha: 0.25),
         ),
@@ -240,8 +268,8 @@ class _UrlCheckerScreenState
             child: Column(
               children: [
                 Container(
-                  width: 72,
-                  height: 72,
+                  width: AppTheme.tileIconXl,
+                  height: AppTheme.tileIconXl,
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.10),
                     shape: BoxShape.circle,
@@ -257,6 +285,9 @@ class _UrlCheckerScreenState
 
                 Text(
                   _getTitle(result.level),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: color,
                     fontSize: 22,
@@ -267,7 +298,9 @@ class _UrlCheckerScreenState
                 const SizedBox(height: 4),
 
                 Text(
-                  '${result.score} / 100',
+                  AppLocaleScope.of(context).formatScore(result.score),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 30,
                     fontWeight: FontWeight.bold,
@@ -279,6 +312,9 @@ class _UrlCheckerScreenState
 
                 Text(
                   result.category,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: AppTheme.textSecondary,
                   ),
@@ -290,10 +326,12 @@ class _UrlCheckerScreenState
                   _tr('urlChecker.confidence')
                       .replaceAll(
                     '{percent}',
-                    (result.confidence * 100)
-                        .round()
-                        .toString(),
+                    AppLocaleScope.of(context)
+                        .formatNumber((result.confidence * 100).round()),
                   ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontSize: 12,
                     color: AppTheme.textSecondary,
@@ -326,13 +364,16 @@ class _UrlCheckerScreenState
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: AppTheme.background,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppTheme.radiusXs),
             ),
             child: Text(
               result.url,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontSize: 13,
                 color: AppTheme.textPrimary,
+                wordSpacing: 1.2,
               ),
             ),
           ),
@@ -424,9 +465,9 @@ class _UrlCheckerScreenState
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.primary.withValues(
-          alpha: 0.05,
+          alpha: AppTheme.tintSurface,
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
       ),
       child: Row(
         crossAxisAlignment:

@@ -36,7 +36,14 @@ class PremiumScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(title: Text(t('subscription.appBarTitle'))),
+      appBar: AppBar(
+        title: Text(t('subscription.appBarTitle')),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: AppTheme.headerGradient,
+          ),
+        ),
+      ),
       body: SafeArea(
         child: Builder(
           builder: (context) {
@@ -118,18 +125,33 @@ class _Hero extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Container(
-          width: 80,
-          height: 80,
-          decoration: BoxDecoration(
-            color: AppTheme.primary.withValues(alpha: 0.10),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.shield_rounded,
-            size: 44,
-            color: AppTheme.primary,
-          ),
+        // Real brand logo (same asset used by the splash) at the top
+        // of the Premium screen, so the upsell reads as an intentional
+        // brand moment instead of a tinted shield disc.
+        Image.asset(
+          'assets/logo_full.png',
+          width: 140,
+          height: 140,
+          fit: BoxFit.contain,
+          // Fallback to a shield mark if the asset isn't bundled on
+          // a desktop flavor. Keeps the screen usable in every build.
+          errorBuilder: (_, error, stack) {
+            // ignore: avoid_print
+            print('[PremiumScreen] logo asset missing: $error');
+            return Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.10),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.shield_rounded,
+                size: 56,
+                color: AppTheme.primary,
+              ),
+            );
+          },
         ),
         const SizedBox(height: 16),
         Text(
@@ -159,7 +181,7 @@ class _BenefitsCard extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
         border: Border.all(color: AppTheme.borderSubtle),
       ),
       child: Column(
@@ -171,7 +193,7 @@ class _BenefitsCard extends StatelessWidget {
               fontSize: 12,
               fontWeight: FontWeight.bold,
               color: AppTheme.textSecondary,
-              letterSpacing: 1.2,
+              letterSpacing: 0.8,
             ),
           ),
           const SizedBox(height: 14),
@@ -205,7 +227,7 @@ class _BenefitRow extends StatelessWidget {
               style: const TextStyle(
                 fontSize: 15,
                 color: AppTheme.textPrimary,
-                height: 1.35,
+                height: 1.4,
               ),
             ),
           ),
@@ -244,36 +266,53 @@ class _SubscribeButton extends StatelessWidget {
       return _ActiveBadge(label: tr('subscription.card.premiumStatus'));
     }
 
-    return SizedBox(
+    return Container(
       height: 52,
-      child: ElevatedButton(
-        onPressed: isSubscribing ? null : () => service.subscribe(),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppTheme.primary,
-          foregroundColor: Colors.white,
-          disabledBackgroundColor:
-              AppTheme.primary.withValues(alpha: 0.55),
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+      decoration: BoxDecoration(
+        // Brand header gradient token — same `primary → secondary` as the
+        // AppBar, Go Premium banner, Profile upsell, and check tile
+        // CTAs. Using the token keeps a future brand refresh in sync.
+        gradient: AppTheme.headerGradient,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primary.withValues(alpha: 0.30),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+          onTap: isSubscribing ? null : () => service.subscribe(),
+          child: Center(
+            child: isSubscribing
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.4,
+                      color: Colors.white,
+                    ),
+                  )
+                : Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ),
           ),
         ),
-        child: isSubscribing
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.4,
-                  color: Colors.white,
-                ),
-              )
-            : Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
       ),
     );
   }
@@ -290,7 +329,7 @@ class _ActiveBadge extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: AppTheme.secondary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -335,8 +374,12 @@ class _ErrorBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFFDECEC),
-        borderRadius: BorderRadius.circular(14),
+        // Use the danger-tinted surface token instead of an ad-hoc
+        // hex; same role as [AiUnavailableBanner] (amber tint on
+        // amberBannerBackground) — keeps "destructive/AI-fallback
+        // banner" surface treatments on one scale.
+        color: AppTheme.danger.withValues(alpha: AppTheme.tintSurface),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
         border: Border.all(color: AppTheme.danger.withValues(alpha: 0.30)),
       ),
       child: Column(

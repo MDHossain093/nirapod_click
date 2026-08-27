@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/locale/app_locale.dart';
 import '../../core/theme/app_theme.dart';
 import '../check/check_screen.dart';
 import '../home/home_page.dart';
@@ -45,6 +46,10 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Read translations inside build so a locale toggle rebuilds the
+    // bar (AppLocaleScope is an InheritedWidget — the inherited lookup
+    // here registers a dependency and triggers rebuild on change).
+    final t = AppLocaleScope.of(context).tr;
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
@@ -60,28 +65,30 @@ class _MainScreenState extends State<MainScreen> {
         },
         backgroundColor: Colors.white,
         indicatorColor: AppTheme.primary.withValues(
-          alpha: 0.10,
+          alpha: AppTheme.tintSubtle,
         ),
-        destinations: const [
+        // Note: `destinations` is no longer `const` because the labels
+        // come from the locale lookup, which is a runtime value.
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded),
-            label: 'Home',
+            icon: const Icon(Icons.home_outlined),
+            selectedIcon: const Icon(Icons.home_rounded),
+            label: t('nav.home'),
           ),
           NavigationDestination(
-            icon: Icon(Icons.shield_outlined),
-            selectedIcon: Icon(Icons.shield_rounded),
-            label: 'Check',
+            icon: const Icon(Icons.shield_outlined),
+            selectedIcon: const Icon(Icons.shield_rounded),
+            label: t('nav.check'),
           ),
           NavigationDestination(
-            icon: Icon(Icons.school_outlined),
-            selectedIcon: Icon(Icons.school_rounded),
-            label: 'Learn',
+            icon: const Icon(Icons.school_outlined),
+            selectedIcon: const Icon(Icons.school_rounded),
+            label: t('nav.learn'),
           ),
           NavigationDestination(
-            icon: Icon(Icons.person_outline_rounded),
-            selectedIcon: Icon(Icons.person_rounded),
-            label: 'Profile',
+            icon: const Icon(Icons.person_outline_rounded),
+            selectedIcon: const Icon(Icons.person_rounded),
+            label: t('nav.profile'),
           ),
         ],
       ),

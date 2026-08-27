@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'digits.dart' as digits;
+import 'localizer.dart';
+
 /// Available UI languages for the NirapodClick app.
 enum AppLocale { english, bangla }
 
@@ -43,8 +46,38 @@ class AppLocaleScope extends InheritedWidget {
   }
 
   @override
-  bool updateShouldNotify(AppLocaleScope oldWidget) =>
-      locale != oldWidget.locale;
+  bool updateShouldNotify(AppLocaleScope oldWidget) {
+    // Keep the context-free Localizer singleton in sync with the
+    // widget-tree locale so pure-Dart engines (RiskEngine,
+    // UrlRiskEngine, PhoneRiskEngine, AiService) emit Bangla strings
+    // when the user has picked Bangla. Engines don't have access to
+    // a BuildContext, so they read through Localizer.instance.tr()
+    // instead of the InheritedWidget.
+    if (locale != oldWidget.locale) {
+      Localizer.instance.setLocale(locale);
+      return true;
+    }
+    return false;
+  }
+
+  /// Format a number with locale-appropriate digits.
+  ///
+  /// Widget-tree-aware sibling of [Localizer.formatNumber]. Call
+  /// sites that already have a [BuildContext] should prefer this so
+  /// the digits track the [AppLocaleScope] the screen is wrapped in
+  /// (which is also the source of truth used by [tr]).
+  ///
+  /// Both helpers delegate to [digits.formatInt] so the digit table
+  /// lives in exactly one place.
+  String formatNumber(num value) => digits.formatInt(value.toInt(), locale);
+
+  /// `value * 100`, rounded, with localized digits and a `%` suffix.
+  String formatPercent(double value) => digits.formatPercent(value, locale);
+
+  /// `<n> / <denominator>` with localized digits. Defaults to the
+  /// 0..100 risk-score scale.
+  String formatScore(int score, {int denominator = 100}) =>
+      digits.formatScore(score, locale, denominator: denominator);
 }
 
 class _Entry {
@@ -60,8 +93,18 @@ const Map<String, _Entry> _translations = {
   'app.title': _Entry('NirapodClick', 'নিরাপদ ক্লিক'),
   'app.tagline': _Entry('Stay safe online', 'অনলাইনে নিরাপদ থাকুন'),
 
+  // -- Generic --
+  'common.cancel': _Entry('Cancel', 'বাতিল'),
+  'common.close': _Entry('Close', 'বন্ধ করুন'),
+
   // -- Greeting --
-  'home.greeting': _Entry('Good Morning,', 'শুভ সকাল,'),
+  // Time-of-day variants keyed off the local hour. The home header
+  // picks one of these in [HomePage._greetingFor] so "Good Morning"
+  // never leaks into the evening.
+  'home.greeting.morning': _Entry('Good Morning,', 'শুভ সকাল,'),
+  'home.greeting.afternoon': _Entry('Good Afternoon,', 'শুভ দুপুর,'),
+  'home.greeting.evening': _Entry('Good Evening,', 'শুভ সন্ধ্যা,'),
+  'home.greeting.night': _Entry('Good Night,', 'শুভ রাত্রি,'),
   'home.greetingFallback': _Entry('there', 'আপনি'),
 
   // -- Safety score --
@@ -75,6 +118,82 @@ const Map<String, _Entry> _translations = {
   'home.safetyReportSoon': _Entry(
     'Safety report coming soon.',
     'নিরাপত্তা রিপোর্ট শীঘ্রই আসছে।',
+  ),
+
+  // -- Home safety-score card (post-redesign) --
+  // Replaces the per-tile "X left today" count with a single
+  // dashboard widget that aggregates the user's recent scans.
+  'home.safetyScoreCard.title': _Entry(
+    'Your Safety Score',
+    'আপনার নিরাপত্তা স্কোর',
+  ),
+  'home.safetyScoreCard.subtitle': _Entry(
+    'Based on your last 30 days of scans',
+    'গত ৩০ দিনের স্ক্যানের ভিত্তিতে',
+  ),
+  'home.safetyScoreCard.last30Days': _Entry(
+    'Last 30 days',
+    'গত ৩০ দিন',
+  ),
+  'home.safetyScoreCard.emptyTitle': _Entry(
+    'No scans yet',
+    'এখনো কোনো স্ক্যান নেই',
+  ),
+  'home.safetyScoreCard.emptyBody': _Entry(
+    'Run your first check to start tracking your safety score.',
+    'আপনার নিরাপত্তা স্কোর ট্র্যাক করতে প্রথম যাচাই চালান।',
+  ),
+  'home.safetyScoreCard.emptyCta': _Entry(
+    'Run your first check',
+    'প্রথম যাচাই চালান',
+  ),
+  'home.safetyScoreCard.viewDetails': _Entry(
+    'View details',
+    'বিস্তারিত দেখুন',
+  ),
+  'home.safetyScoreCard.status.excellent': _Entry(
+    'Excellent',
+    'চমৎকার',
+  ),
+  'home.safetyScoreCard.status.good': _Entry(
+    'Good',
+    'ভালো',
+  ),
+  'home.safetyScoreCard.status.fair': _Entry(
+    'Fair',
+    'মোটামুটি',
+  ),
+  'home.safetyScoreCard.status.poor': _Entry(
+    'Needs attention',
+    'মনোযোগ দরকার',
+  ),
+  'home.safetyScoreCard.status.critical': _Entry(
+    'Critical',
+    'গুরুতর',
+  ),
+  'home.safetyScoreCard.stat.critical': _Entry(
+    'Critical',
+    'গুরুতর',
+  ),
+  'home.safetyScoreCard.stat.high': _Entry(
+    'High',
+    'উচ্চ',
+  ),
+  'home.safetyScoreCard.stat.medium': _Entry(
+    'Medium',
+    'মাঝারি',
+  ),
+  'home.safetyScoreCard.stat.safe': _Entry(
+    'Safe',
+    'নিরাপদ',
+  ),
+  'home.safetyScoreCard.runCheck': _Entry(
+    'Run a check',
+    'যাচাই চালান',
+  ),
+  'home.safetyScoreCard.runCheckSubtitle': _Entry(
+    'Message, link, screenshot or phone number',
+    'বার্তা, লিংক, স্ক্রিনশট বা ফোন নম্বর',
   ),
 
   // -- Section titles --
@@ -101,7 +220,6 @@ const Map<String, _Entry> _translations = {
   'home.tile.number.subtitle': _Entry('Phone reports', 'ফোন রিপোর্ট'),
 
   // -- Snackbar / system --
-  'home.noAlerts': _Entry('No new alerts.', 'নতুন সতর্কতা নেই।'),
   'home.screenshotSoon': _Entry(
     'Screenshot scanner is coming soon.',
     'স্ক্রিনশট স্ক্যানার শীঘ্রই আসছে।',
@@ -109,10 +227,6 @@ const Map<String, _Entry> _translations = {
   'home.numberSoon': _Entry(
     'Phone number lookup is coming soon.',
     'ফোন নম্বর অনুসন্ধান শীঘ্রই আসছে।',
-  ),
-  'home.scamAlertsSoon': _Entry(
-    'Scam alerts list coming soon.',
-    'প্রতারণা সতর্কতা তালিকা শীঘ্রই আসছে।',
   ),
   'home.copiedEn': _Entry(
     'English report copied to clipboard',
@@ -131,6 +245,27 @@ const Map<String, _Entry> _translations = {
   ),
   'home.scansUnlimited': _Entry('Unlimited', 'আনলিমিটেড'),
   'home.premiumActiveChip': _Entry('✨ Premium active', '✨ প্রিমিয়াম সক্রিয়'),
+
+  // -- Header plan badge + "X of 5 free checks" inline --
+  // The plan badge sits in the top-right of the header next to the
+  // EN/BN language toggle and is read-only — tapping it doesn't do
+  // anything (it's a status, not a switch). The free-checks line
+  // sits under the "Stay safe online" tagline and shows how many of
+  // the monthly 5-check budget the user has consumed.
+  'home.headerPlan.free': _Entry('FREE', 'ফ্রি'),
+  'home.headerPlan.premium': _Entry('PREMIUM', 'প্রিমিয়াম'),
+  'home.headerQuota.inline': _Entry(
+    '{used} of 5 free checks used this month',
+    'এই মাসে {used} / ৫টি ফ্রি যাচাই ব্যবহৃত',
+  ),
+  'home.headerQuota.inlineFresh': _Entry(
+    '5 of 5 free checks left this month',
+    'এই মাসে ৫ / ৫টি ফ্রি যাচাই বাকি',
+  ),
+  'home.headerQuota.unlimited': _Entry(
+    'Unlimited checks · Premium',
+    'আনলিমিটেড যাচাই · প্রিমিয়াম',
+  ),
   'home.recentScansEmptyHint': _Entry(
     'Tap a Quick Check above to run your first scan.',
     'আপনার প্রথম স্ক্যান করতে উপরের যেকোনো চেক ব্যবহার করুন।',
@@ -171,11 +306,42 @@ const Map<String, _Entry> _translations = {
   'history.typeMessage': _Entry('Message', 'বার্তা'),
   'history.typeUrl': _Entry('URL', 'লিংক'),
   'history.typeScreenshot': _Entry('Screenshot', 'স্ক্রিনশট'),
-  'history.typePhone': _Entry('Phone Number', 'ফোন নম্বর'),
+  'history.typePhone': _Entry('Phone', 'ফোন'),
   'history.clearedToast': _Entry(
     'History cleared',
     'ইতিহাস মুছে ফেলা হয়েছে',
   ),
+
+  // -- Alerts screen --
+  'alerts.appBarTitle': _Entry('Safety Alerts', 'নিরাপত্তা সতর্কতা'),
+  'alerts.emptyTitle': _Entry(
+    'No critical alerts',
+    'কোনো গুরুতর সতর্কতা নেই',
+  ),
+  'alerts.emptyBody': _Entry(
+    'Scans with a high risk score and confidence will appear here.',
+    'উচ্চ ঝুঁকির স্কোর ও আত্মবিশ্বাস সহ স্ক্যানগুলো এখানে দেখা যাবে।',
+  ),
+  'alerts.group.today': _Entry('Today', 'আজ'),
+  'alerts.group.yesterday': _Entry('Yesterday', 'গতকাল'),
+  'alerts.group.earlierThisWeek': _Entry(
+    'Earlier this week',
+    'এই সপ্তাহের আগে',
+  ),
+  'alerts.group.earlier': _Entry('Earlier', 'আগে'),
+  'alerts.viewScan': _Entry('View scan', 'স্ক্যান দেখুন'),
+  'alerts.loadError': _Entry(
+    'Could not load alerts.\n{error}',
+    'সতর্কতা লোড করা যায়নি।\n{error}',
+  ),
+  'alerts.adminHeader': _Entry(
+    'Official safety alerts',
+    'সরকারি নিরাপত্তা সতর্কতা',
+  ),
+  'alerts.adminBadge': _Entry('OFFICIAL', 'সরকারি'),
+  'alerts.severity.info': _Entry('INFO', 'তথ্য'),
+  'alerts.severity.warning': _Entry('WARNING', 'সতর্কতা'),
+  'alerts.severity.critical': _Entry('CRITICAL', 'গুরুতর'),
 
   // -- Message checker placeholder body --
   'messageChecker.title': _Entry('Check Message', 'বার্তা যাচাই করুন'),
@@ -212,6 +378,34 @@ const Map<String, _Entry> _translations = {
   'messageChecker.tapForDetails': _Entry(
     'Tap for full details',
     'বিস্তারিত দেখতে ট্যাপ করুন',
+  ),
+
+  // -- Message Checker — hero strip + inline verdict card (redesign) --
+  'messageChecker.heading': _Entry('Check a message', 'বার্তা যাচাই করুন'),
+  'messageChecker.subheading': _Entry(
+    "Paste any suspicious SMS, WhatsApp or email below. We'll scan it for phishing, scam and impersonation signals.",
+    'নিচে যেকোনো সন্দেহজনক এসএমএস, হোয়াটসঅ্যাপ বা ইমেইল পেস্ট করুন। আমরা ফিশিং, স্ক্যাম ও প্রতারণার সংকেত খুঁজব।',
+  ),
+  'messageChecker.noWarnings': _Entry(
+    'No specific risk signals detected.',
+    'নির্দিষ্ট কোনো ঝুঁকির সংকেত পাওয়া যায়নি।',
+  ),
+  'messageChecker.why': _Entry('Why?', 'কেন?'),
+  'messageChecker.recommendations': _Entry(
+    'What should you do?',
+    'আপনার কী করা উচিত?',
+  ),
+  'messageChecker.aiAssisted': _Entry(
+    'AI-assisted',
+    'এআই সহায়তায়',
+  ),
+  'messageChecker.localOnly': _Entry(
+    'Local rules only',
+    'শুধু স্থানীয় নিয়ম',
+  ),
+  'messageChecker.safetyNotice': _Entry(
+    'For your safety: never share OTPs, PINs or passwords — even with someone you trust. NirapodClick checks signals, not intentions.',
+    'নিরাপত্তার জন্য: ওটিপি, পিন বা পাসওয়ার্ড কারো সাথে শেয়ার করবেন না — এমনকি বিশ্বস্ত কারো সাথেও নয়। নিরাপদক্লিক সংকেত যাচাই করে, অভিস্তি নয়।',
   ),
 
   // -- URL checker placeholder body --
@@ -406,7 +600,7 @@ const Map<String, _Entry> _translations = {
     'Please enter a phone number.',
     'একটি ফোন নম্বর দিন।',
   ),
-  'phoneChecker.numberLabel': _Entry('Number', 'নম্বর'),
+  'phoneChecker.numberLabel': _Entry('Phone numbers', 'ফোন নম্বর'),
   'phoneChecker.operatorLabel': _Entry('Operator', 'অপারেটর'),
   'phoneChecker.reportsLabel': _Entry('Reports', 'রিপোর্ট'),
   'phoneChecker.why': _Entry('Why?', 'কেন?'),
@@ -510,7 +704,7 @@ const Map<String, _Entry> _translations = {
     'Scan text from a screenshot',
     'স্ক্রিনশটের লেখা স্ক্যান করুন',
   ),
-  'check.phoneTitle': _Entry('Phone Number', 'ফোন নম্বর'),
+  'check.phoneTitle': _Entry('Phone', 'ফোন'),
   'check.phoneSubtitle': _Entry(
     'Check community reports',
     'কমিউনিটি রিপোর্ট যাচাই করুন',
@@ -525,6 +719,10 @@ const Map<String, _Entry> _translations = {
   'profile.sectionActivity': _Entry(
     'Your Activity',
     'আপনার কার্যকলাপ',
+  ),
+  'profile.sectionSafety': _Entry(
+    'Your Safety',
+    'আপনার নিরাপত্তা',
   ),
   'profile.sectionSettings': _Entry('Settings', 'সেটিংস'),
   'profile.sectionAccount': _Entry('Account', 'অ্যাকাউন্ট'),
@@ -549,6 +747,72 @@ const Map<String, _Entry> _translations = {
     'Manage safety alerts',
     'নিরাপত্তা সতর্কতা পরিচালনা করুন',
   ),
+  'profile.menuLanguageTitle': _Entry('Language', 'ভাষা'),
+  'profile.menuLanguageSubtitle': _Entry(
+    'Choose your app language',
+    'অ্যাপের ভাষা নির্বাচন করুন',
+  ),
+  'profile.menuThemeTitle': _Entry('Theme', 'থিম'),
+  'profile.menuThemeSubtitle': _Entry(
+    'Light, dark, or system',
+    'হালকা, অন্ধকার বা সিস্টেম',
+  ),
+  'profile.themeComingSoon': _Entry(
+    'Coming soon — light mode is currently the only theme available.',
+    'শীঘ্রই আসছে — বর্তমানে শুধু হালকা মোড পাওয়া যায়।',
+  ),
+  'profile.notificationsToggleTitle': _Entry(
+    'Enable safety alerts',
+    'নিরাপত্তা সতর্কতা চালু করুন',
+  ),
+  'profile.notificationsToggleSubtitle': _Entry(
+    'Show new critical scans on the home bell',
+    'নতুন গুরুতর স্ক্যান হোমের ঘণ্টায় দেখান',
+  ),
+  'profile.privacyDeleteAll': _Entry(
+    'Delete all scan history',
+    'সব স্ক্যান ইতিহাস মুছুন',
+  ),
+  'profile.privacyDeleteAllConfirm': _Entry(
+    'Delete all scans?',
+    'সব স্ক্যান মুছে ফেলবেন?',
+  ),
+  'profile.privacyDeleteAllBody': _Entry(
+    'This permanently removes every saved scan. This cannot be undone.',
+    'এটি প্রতিটি সংরক্ষিত স্ক্যান স্থায়ীভাবে মুছে দেবে। এটি ফিরিয়ে আনা যাবে না।',
+  ),
+  'profile.privacyDeleteSelected': _Entry(
+    'Select scans to delete',
+    'মুছতে স্ক্যান নির্বাচন করুন',
+  ),
+  'profile.historySelectTitle': _Entry(
+    'Select scans to delete',
+    'মুছতে স্ক্যান নির্বাচন করুন',
+  ),
+  'profile.historySelectEmpty': _Entry(
+    'No scans to delete.',
+    'মুছার জন্য কোনো স্ক্যান নেই।',
+  ),
+  'profile.historySelectLoadError': _Entry(
+    'Could not load scans. Check your connection and try again.',
+    'স্ক্যান লোড করা যায়নি। আপনার সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।',
+  ),
+  'profile.historySelectRetry': _Entry('Retry', 'আবার চেষ্টা করুন'),
+  'profile.historySelectCount': _Entry(
+    '{n} selected',
+    '{n}টি নির্বাচিত',
+  ),
+  'profile.historySelectDelete': _Entry('Delete', 'মুছুন'),
+  'profile.historySelectDeleteConfirm': _Entry(
+    'Delete {n} scans?',
+    '{n}টি স্ক্যান মুছে ফেলবেন?',
+  ),
+  'profile.historyDeletedToast': _Entry(
+    'Deleted {n} scans.',
+    '{n}টি স্ক্যান মুছে ফেলা হয়েছে।',
+  ),
+  'profile.commonDelete': _Entry('Delete', 'মুছুন'),
+  'profile.commonCancel': _Entry('Cancel', 'বাতিল'),
   'profile.menuPrivacyTitle': _Entry('Privacy', 'গোপনীয়তা'),
   'profile.menuPrivacySubtitle': _Entry(
     'Manage your scan data',
@@ -559,10 +823,20 @@ const Map<String, _Entry> _translations = {
     'Sign out of NirapodClick',
     'নিরাপদক্লিক থেকে সাইন আউট করুন',
   ),
+  'profile.sectionAdmin': _Entry('Admin', 'অ্যাডমিন'),
+  'profile.menuAdminAlertsTitle': _Entry(
+    'Safety alerts',
+    'নিরাপত্তা সতর্কতা',
+  ),
+  'profile.menuAdminAlertsSubtitle': _Entry(
+    'Publish alerts to all users',
+    'সব ব্যবহারকারীদের সতর্কতা প্রকাশ করুন',
+  ),
   'profile.notificationsBody': _Entry(
-    'Safety notifications can be enabled here '
-    'when the alert system is added.',
-    'সতর্কতা ব্যবস্থা যুক্ত হলে এখান থেকে নিরাপত্তা বিজ্ঞপ্তি চালু করা যাবে।',
+    'Critical scan alerts appear on the home bell. '
+    'Tap the bell to review them.',
+    'গুরুতর স্ক্যান সতর্কতা হোমের ঘণ্টায় দেখা যায়। '
+    'সতর্কতাগুলো দেখতে ঘণ্টায় ট্যাপ করুন।',
   ),
   'profile.privacyBody': _Entry(
     'NirapodClick should only store the minimum '
@@ -601,9 +875,44 @@ const Map<String, _Entry> _translations = {
     'নিরাপদক্লিক কেবল ঝুঁকির ইঙ্গিত দেয়, নিরাপদ বা ক্ষতিকর হওয়ার নিশ্চয়তা '
     'দেয় না। গুরুত্বপূর্ণ অনুরোধ সবসময় সরকারি/প্রাতিষ্ঠানিক চ্যানেলে যাচাই করুন।',
   ),
+  'result.originalHeader': _Entry(
+    'Original message',
+    'মূল বার্তা',
+  ),
   'result.aiUnavailable': _Entry(
     'AI analysis unavailable. Showing the local rule-engine result instead.',
     'AI বিশ্লেষণ পাওয়া যায়নি। স্থানীয় নিয়ম-ভিত্তিক ফলাফল দেখানো হচ্ছে।',
+  ),
+  // Result-screen labels: rendered via `AppLocaleScope.of(context).tr(...)`
+  // in `risk_result_page.dart`. Earlier these only lived in the engine
+  // map (`lib/core/locale/localizer.dart`), so the widget tree's
+  // translator fell back to the raw key string ("result.label.back",
+  // etc.) — fixed by mirroring them here.
+  'result.label.appBarTitle': _Entry('Result', 'ফলাফল'),
+  'result.label.score': _Entry(
+    'Risk score: {score} / 100',
+    'ঝুঁকির স্কোর: {score} / ১০০',
+  ),
+  'result.label.category': _Entry('Category', 'বিভাগ'),
+  'result.label.confidence': _Entry('Confidence', 'নিশ্চয়তা'),
+  'result.label.aiBadge': _Entry('✨ AI Analysis', '✨ AI বিশ্লেষণ'),
+  'result.label.whatWeFound': _Entry(
+    'What we found ({count})',
+    'আমরা যা পেয়েছি ({count})',
+  ),
+  'result.label.noSignals': _Entry(
+    'No suspicious signals detected.',
+    'কোনো সন্দেহজনক ইঙ্গিত পাওয়া যায়নি।',
+  ),
+  'result.label.safetyTips': _Entry(
+    'Safety tips',
+    'নিরাপত্তা পরামর্শ',
+  ),
+  'result.label.back': _Entry('Back', 'ফিরে যান'),
+  'result.label.copy': _Entry('Copy report', 'রিপোর্ট কপি করুন'),
+  'result.label.copied': _Entry(
+    'Report copied to clipboard',
+    'রিপোর্ট ক্লিপবোর্ডে কপি হয়েছে',
   ),
 
   // -- Premium / Subscription screen --
@@ -657,8 +966,8 @@ const Map<String, _Entry> _translations = {
     'সাবস্ক্রিপশন যাচাই হচ্ছে...',
   ),
   'subscription.fineprint': _Entry(
-    'Subscription renews daily. Cancel anytime.',
-    'সাবস্ক্রিপশন প্রতিদিন নবায়ন হবে। যেকোনো সময় বাতিল করতে পারবেন।',
+    'Unsubscribe',
+    'নাম প্রত্যাহার',
   ),
   'subscription.errorTitle': _Entry(
     'Subscription could not be verified',
@@ -698,6 +1007,10 @@ const Map<String, _Entry> _translations = {
     'NirapodClick Free',
     'নিরাপদক্লিক ফ্রি',
   ),
+  'subscription.card.freeSubtitle': _Entry(
+    'Your daily safety check budget',
+    'আপনার দৈনিক নিরাপত্তা যাচাই বাজেট',
+  ),
   'subscription.card.freeScreenshots': _Entry(
     '{count} screenshot scans left',
     '{count}টি স্ক্রিনশট স্ক্যান বাকি',
@@ -706,8 +1019,164 @@ const Map<String, _Entry> _translations = {
     '{count} message scans left',
     '{count}টি বার্তা স্ক্যান বাকি',
   ),
+  'subscription.card.freeScreenshotsLabel': _Entry(
+    'Screenshot scans',
+    'স্ক্রিনশট স্ক্যান',
+  ),
+  'subscription.card.freeMessagesLabel': _Entry(
+    'Message scans',
+    'বার্তা স্ক্যান',
+  ),
+  'subscription.card.freeTotalLabel': _Entry(
+    'Total scans left',
+    'মোট স্ক্যান বাকি',
+  ),
+  'subscription.card.premiumPriceLabel': _Entry(
+    'Plan price',
+    'প্ল্যান মূল্য',
+  ),
+  'subscription.card.nextRenewalLabel': _Entry(
+    'Next renewal',
+    'পরবর্তী নবায়ন',
+  ),
   'subscription.card.goPremiumCta': _Entry(
     '✨ Go Premium',
     '✨ প্রিমিয়ামে যান',
   ),
+
+  // -- Admin alerts screen --
+  'adminAlerts.appBarTitle': _Entry(
+    'Admin Alerts',
+    'অ্যাডমিন সতর্কতা',
+  ),
+  'adminAlerts.refresh': _Entry('Refresh', 'রিফ্রেশ'),
+  'adminAlerts.compose': _Entry('Publish alert', 'সতর্কতা প্রকাশ'),
+  'adminAlerts.consoleOnlyNotice': _Entry(
+    'Alerts are managed in the Firebase Console for security. '
+    'Use this form to preview and prepare the alert, then paste it into the Console.',
+    'নিরাপত্তার জন্য সতর্কতাগুলো ফায়ারবেস কনসোলে পরিচালিত হয়। '
+    'এই ফর্মটি সতর্কতা প্রস্তুত ও পূর্বরূপ দেখানোর জন্য ব্যবহার করুন, তারপর কনসোলে পেস্ট করুন।',
+  ),
+  'adminAlerts.sectionLive': _Entry('Live alerts', 'সক্রিয় সতর্কতা'),
+  'adminAlerts.emptyLive': _Entry(
+    'No alerts published yet.',
+    'এখনও কোনো সতর্কতা প্রকাশিত হয়নি।',
+  ),
+  'adminAlerts.draftCopied': _Entry(
+    'Draft prepared. Open Firebase Console → Firestore → admin_alerts to publish.',
+    'খসড়া প্রস্তুত। প্রকাশ করতে Firebase Console → Firestore → admin_alerts খুলুন।',
+  ),
+  'adminAlerts.composeTitle': _Entry(
+    'Compose alert',
+    'সতর্কতা তৈরি করুন',
+  ),
+  'adminAlerts.fieldDocId': _Entry('Document ID', 'ডকুমেন্ট আইডি'),
+  'adminAlerts.fieldDocIdHint': _Entry(
+    'lowercase-id-with-dashes (e.g. bkash-phishing-q4)',
+    'ছোটহাতের-আইডি-ড্যাশসহ (যেমন: bkash-phishing-q4)',
+  ),
+  'adminAlerts.fieldTitleEn': _Entry('Title (English)', 'শিরোনাম (ইংরেজি)'),
+  'adminAlerts.fieldTitleBn': _Entry('Title (Bangla)', 'শিরোনাম (বাংলা)'),
+  'adminAlerts.fieldBodyEn': _Entry('Body (English)', 'বিষয়বস্তু (ইংরেজি)'),
+  'adminAlerts.fieldBodyBn': _Entry('Body (Bangla)', 'বিষয়বস্তু (বাংলা)'),
+  'adminAlerts.fieldSeverity': _Entry('Severity', 'তীব্রতা'),
+  'adminAlerts.fieldActive': _Entry('Active (visible to users)', 'সক্রিয় (ব্যবহারকারীদের কাছে দৃশ্যমান)'),
+  'adminAlerts.submit': _Entry('Prepare draft', 'খসড়া প্রস্তুত করুন'),
+  'adminAlerts.cancel': _Entry('Cancel', 'বাতিল'),
+  'adminAlerts.previewHeader': _Entry('Preview', 'পূর্বরূপ'),
+
+  // -- Admin URL rules screen --
+  'adminUrlRules.appBarTitle': _Entry(
+    'Admin • URL Rules',
+    'অ্যাডমিন • URL নিয়ম',
+  ),
+  'adminUrlRules.noticeConsoleOnly': _Entry(
+    'URL rules are managed in the Firebase Console for security. '
+    'Use this form to preview the live rules and prepare a draft, then paste it into the Console.',
+    'নিরাপত্তার জন্য URL নিয়মগুলো ফায়ারবেস কনসোলে পরিচালিত হয়। '
+    'এই ফর্মটি সক্রিয় নিয়ম দেখতে ও খসড়া প্রস্তুত করতে ব্যবহার করুন, তারপর কনসোলে পেস্ট করুন।',
+  ),
+  'adminUrlRules.compose': _Entry('New URL rule', 'নতুন URL নিয়ম'),
+  'adminUrlRules.composeTitle': _Entry(
+    'Compose URL rule',
+    'URL নিয়ম তৈরি করুন',
+  ),
+  'adminUrlRules.draftCopied': _Entry(
+    'Draft prepared. Open Firebase Console → Firestore → url_scam_rules to publish.',
+    'খসড়া প্রস্তুত। প্রকাশ করতে Firebase Console → Firestore → url_scam_rules খুলুন।',
+  ),
+  'adminUrlRules.empty': _Entry(
+    'No URL rules published yet. The app is using the bundled defaults.',
+    'এখনও কোনো URL নিয়ম প্রকাশিত হয়নি। অ্যাপটি ডিফল্ট নিয়ম ব্যবহার করছে।',
+  ),
+  'adminUrlRules.typeLabel': _Entry('Type', 'ধরন'),
+  'adminUrlRules.patternLabel': _Entry('Pattern (substring to match)', 'প্যাটার্ন (মেলানোর অংশ)'),
+  'adminUrlRules.categoryLabel': _Entry('Output category', 'আউটপুট বিভাগ'),
+  'adminUrlRules.scoreLabel': _Entry('Score', 'স্কোর'),
+  'adminUrlRules.activeLabel': _Entry('Active', 'সক্রিয়'),
+  'adminUrlRules.activeOn': _Entry('Active', 'সক্রিয়'),
+  'adminUrlRules.activeOff': _Entry('Off', 'বন্ধ'),
+  'adminUrlRules.type.tld': _Entry('TLD', 'TLD'),
+  'adminUrlRules.type.foreignTld': _Entry('Foreign TLD', 'বিদেশি TLD'),
+  'adminUrlRules.type.extension': _Entry('Extension', 'এক্সটেনশন'),
+  'adminUrlRules.type.keyword': _Entry('Keyword', 'কীওয়ার্ড'),
+  'adminUrlRules.type.shortener': _Entry('Shortener', 'শর্টেনার'),
+  'adminUrlRules.type.brand': _Entry('Brand', 'ব্র্যান্ড'),
+
+  // -- Profile screen admin menu entries --
+  'profile.menuAdminUrlRulesTitle': _Entry(
+    'URL Rules',
+    'URL নিয়ম',
+  ),
+  'profile.menuAdminUrlRulesSubtitle': _Entry(
+    'Preview and compose Firestore-backed URL rule docs.',
+    'Firestore-ভিত্তিক URL নিয়ম ডকুমেন্ট পূর্বরূপ ও তৈরি করুন।',
+  ),
+
+  // -- Free-tier usage quota --
+  // Free users get 5 checks per calendar month. After exhausting the
+  // budget the four scanners refuse to analyze and the Home shows a
+  // single "X of 5 free checks remaining" pill that links to Premium.
+  'quota.remaining': _Entry(
+    '{used} of {total} free checks used this month',
+    'এই মাসে {used} / {total}টি ফ্রি যাচাই ব্যবহৃত',
+  ),
+  'quota.remainingShort': _Entry(
+    '{remaining} free left',
+    '{remaining}টি ফ্রি বাকি',
+  ),
+  'quota.unlimitedActive': _Entry(
+    'Unlimited checks · Premium',
+    'আনলিমিটেড যাচাই · প্রিমিয়াম',
+  ),
+  'quota.exhaustedTitle': _Entry(
+    'Free check limit reached',
+    'ফ্রি যাচাই সীমা শেষ',
+  ),
+  'quota.exhaustedBody': _Entry(
+    'You have used all {total} free checks for this month. '
+    'Subscribe to Premium for unlimited checks.',
+    'এই মাসে আপনার সব {total}টি ফ্রি যাচাই শেষ হয়েছে। '
+    'আনলিমিটেড যাচাইয়ের জন্য প্রিমিয়ামে সাবস্ক্রাইব করুন।',
+  ),
+  'quota.upgradeCta': _Entry(
+    'View Premium plans',
+    'প্রিমিয়াম প্ল্যান দেখুন',
+  ),
+  'quota.alreadyPremium': _Entry(
+    'You have unlimited checks.',
+    'আপনার আনলিমিটেড যাচাই আছে।',
+  ),
+  'quota.spent': _Entry(
+    'Used',
+    'ব্যবহৃত',
+  ),
+  'quota.resetsOn': _Entry(
+    'Resets on {date}',
+    '{date} তারিখে রিসেট হবে',
+  ),
+  'quota.checkName.message': _Entry('Message check', 'বার্তা যাচাই'),
+  'quota.checkName.url': _Entry('URL check', 'লিংক যাচাই'),
+  'quota.checkName.screenshot': _Entry('Screenshot scan', 'স্ক্রিনশট স্ক্যান'),
+  'quota.checkName.phone': _Entry('Phone check', 'ফোন যাচাই'),
 };

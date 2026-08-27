@@ -148,4 +148,46 @@ describe('firestore.rules', () => {
     await assertSucceeds(ref.set({ ...validCheck }));
     await assertSucceeds(ref.delete());
   });
+
+  // ---- url_scam_rules (URL checker rule engine data layer) ----
+  //
+  // Public read / write-deny from the client. Mirrors the
+  // scam_patterns posture so a signed-in user can't poison the
+  // rule set that every other user's app runs.
+  describe('url_scam_rules', () => {
+    test('anonymous user can read', async () => {
+      const db = await anonDb();
+      await assertSucceeds(
+        db.collection('url_scam_rules/test_xyz').get(),
+      );
+    });
+
+    test('signed-in user can read', async () => {
+      const db = await aliceDb();
+      await assertSucceeds(
+        db.collection('url_scam_rules/test_xyz').get(),
+      );
+    });
+
+    test('signed-in user cannot write', async () => {
+      const db = await aliceDb();
+      await assertFails(
+        db.collection('url_scam_rules/test_xyz').set({
+          type: 'keyword',
+          category: 'Phishing',
+          pattern: 'login',
+          score: 15,
+          active: true,
+          version: 1,
+        }),
+      );
+    });
+
+    test('signed-in user cannot update or delete', async () => {
+      const db = await aliceDb();
+      const ref = db.collection('url_scam_rules/test_xyz');
+      await assertFails(ref.doc('test_xyz').update({ active: false }));
+      await assertFails(ref.doc('test_xyz').delete());
+    });
+  });
 });

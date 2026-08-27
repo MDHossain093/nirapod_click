@@ -5,8 +5,10 @@ import '../../core/theme/app_theme.dart';
 import '../../models/phone_risk_result.dart';
 import '../../models/risk_result.dart';
 import '../../services/checker_repository.dart';
+import '../../services/free_quota_service.dart';
 import '../../services/phone_risk_engine.dart';
 import '../../services/report_service.dart';
+import '../../widgets/quota_exhausted_dialog.dart';
 import '../../widgets/risk_disclaimer.dart';
 
 /// Phone Number Checker screen.
@@ -56,6 +58,17 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
 
     if (number.isEmpty) {
       _showMessage(_tr('phoneChecker.emptyInput'));
+      return;
+    }
+
+    // Free-tier gate: same posture as the message / URL / screenshot
+    // checkers. Premium bypasses; free users see the upgrade sheet
+    // when the budget is gone.
+    final quota = FreeQuotaScope.of(context);
+    final allowed = await quota.consume();
+    if (!allowed) {
+      if (!mounted) return;
+      await QuotaExhaustedSheet.show(context);
       return;
     }
 
@@ -256,6 +269,11 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: Text(_tr('phoneChecker.appBarTitle')),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: AppTheme.headerGradient,
+          ),
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -278,7 +296,7 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
                 _tr('phoneChecker.subheading'),
                 style: const TextStyle(
                   color: AppTheme.textSecondary,
-                  height: 1.5,
+                  height: 1.4,
                 ),
               ),
 
@@ -295,24 +313,59 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
 
               const SizedBox(height: 14),
 
-              SizedBox(
+              Container(
                 width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _isChecking ? null : _checkNumber,
-                  icon: _isChecking
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.search_rounded),
-                  label: Text(
-                    _isChecking
-                        ? _tr('phoneChecker.checking')
-                        : _tr('phoneChecker.check'),
+                height: 52,
+                decoration: BoxDecoration(
+                  // Brand header gradient token — same `primary →
+                  // secondary` as the AppBar + Go Premium + Profile
+                  // upsell CTAs.
+                  gradient: AppTheme.headerGradient,
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primary.withValues(alpha: 0.30),
+                      blurRadius: 14,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                    onTap: _isChecking ? null : _checkNumber,
+                    child: Center(
+                      child: _isChecking
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.4,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.search_rounded,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _tr('phoneChecker.check'),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
                   ),
                 ),
               ),
@@ -341,7 +394,7 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
         border: Border.all(
           color: color.withValues(alpha: 0.25),
         ),
@@ -350,7 +403,7 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
         children: [
           Icon(
             Icons.phone_rounded,
-            size: 48,
+            size: AppTheme.tileIconXs,
             color: color,
           ),
 
@@ -358,6 +411,9 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
 
           Text(
             _getTitle(result.level),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: color,
               fontSize: 22,
@@ -368,7 +424,9 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
           const SizedBox(height: 6),
 
           Text(
-            '${result.score} / 100',
+            AppLocaleScope.of(context).formatScore(result.score),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontSize: 30,
               fontWeight: FontWeight.bold,
@@ -390,7 +448,7 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
 
           _infoRow(
             _tr('phoneChecker.reportsLabel'),
-            '${result.reportCount}',
+            AppLocaleScope.of(context).formatNumber(result.reportCount),
           ),
 
           const SizedBox(height: 20),
@@ -492,10 +550,17 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
-          Text(
-            '$label:',
-            style: const TextStyle(
-              color: AppTheme.textSecondary,
+          // Label can grow long in Bangla; let it truncate at one
+          // line so the value column stays right-aligned and the row
+          // height stays predictable.
+          Flexible(
+            child: Text(
+              '$label:',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -503,6 +568,8 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
             child: Text(
               value,
               textAlign: TextAlign.right,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontWeight: FontWeight.w600,
                 color: AppTheme.textPrimary,
@@ -518,8 +585,8 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.primary.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
+        color: AppTheme.primary.withValues(alpha: AppTheme.tintSurface),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

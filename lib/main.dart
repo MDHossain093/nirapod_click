@@ -4,10 +4,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/config/app_env.dart';
 import 'core/locale/app_locale.dart';
+import 'core/locale/localizer.dart';
 import 'core/theme/app_theme.dart';
 import 'firebase_options.dart';
 import 'screens/auth/auth_gate.dart';
+import 'services/alert_service.dart';
+import 'services/free_quota_service.dart';
+import 'services/notifications_prefs_service.dart';
+import 'services/scam_rule_service.dart';
 import 'services/subscription_service.dart';
+import 'services/url_scam_rule_service.dart';
 
 /// SharedPreferences key under which the last selected [AppLocale] is
 /// persisted. Reading the key returns the enum index as a string.
@@ -42,6 +48,44 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  // Load the scam-rule bundle BEFORE first frame so the very first
+  // scan uses the latest Firestore rules if the network is reachable.
+  // [ScamRuleService.loadRules] never throws — it falls back to the
+  // bundled defaults on any error (offline, permission, timeout) so
+  // app launch is never blocked by Firestore.
+  final rules = await ScamRuleService().loadRules();
+  // ignore: avoid_print
+  print('[ScamRuleService] Loaded ${rules.length} patterns.');
+
+  // Same posture for the URL checker: Firestore-first with a bundled
+  // fallback. Both loads run in parallel-safe sequence here because
+  // they share no state and each has its own 4s timeout.
+  final urlRules = await UrlScamRuleService().loadRules();
+  // ignore: avoid_print
+  print('[UrlScamRuleService] Loaded ${urlRules.length} patterns.');
+
+  // Open the alert pipeline so the home-bell badge has data ready
+  // when Home loads — without this, the bell would subscribe lazily
+  // on Home build, briefly showing `0` and then flickering to the
+  // real count. `ensureStarted` is idempotent and the singleton
+  // shares one Firestore subscription across the bell + alerts page.
+  await AlertService.instance.ensureStarted();
+
+  // Load the Profile → Settings → Notifications toggle's persisted state
+  // before the first frame so the SwitchListTile renders the user's
+  // stored choice synchronously (no flicker from default-true to whatever
+  // was persisted).
+  await NotificationsPrefsService.instance.load();
+
+  // Rehydrate the per-kind quota counters ("X message scans left" /
+  // "Y screenshot scans left") from SharedPreferences so the Profile
+  // card renders the correct values on first frame instead of
+  // flashing the static defaults. We do this BEFORE the first frame
+  // for the same reason as the other `load()` calls above — without
+  // it the user would see "5 of 5 left" on app launch even after
+  // running 3 scans in a previous session.
+  await SubscriptionService.instance.rehydrate();
+
   // Restore the last user-selected language before the first frame so
   // every screen renders in the right locale on cold start.
   final prefs = await SharedPreferences.getInstance();
@@ -51,6 +95,14 @@ Future<void> main() async {
           savedIndex < AppLocale.values.length)
       ? AppLocale.values[savedIndex]
       : AppLocale.english;
+
+  // Seed the context-free Localizer singleton up front so the very
+  // first engine call (e.g. Gemini prompt construction during the
+  // AI startup path, or any eager analyzers) renders in the right
+  // locale instead of falling back to English. AppLocaleScope will
+  // call setLocale again on the first frame via updateShouldNotify,
+  // so this is just an early bootstrap, not a divergence.
+  Localizer.instance.setLocale(initialLocale);
 
   runApp(NirapodClickApp(initialLocale: initialLocale));
 }
@@ -89,21 +141,52 @@ class _NirapodClickAppState extends State<NirapodClickApp> {
 
   @override
   Widget build(BuildContext context) {
+    // FreeQuotaService is constructed once per app lifetime so its
+    // quota counter survives the root widget rebuilding (e.g. locale
+    // change rebuilds the tree). We attach it to the SubscriptionService
+    // singleton below via [_ensureQuotaAttached] so the pill flips to
+    // "Unlimited checks · Premium" instantly for premium users instead
+    // of briefly rendering "X of 5 free" on cold start.
+    final quotaService = _ensureQuotaAttached();
+
     return AppLocaleScope(
       locale: _locale,
       onChanged: _setLocale,
       child: SubscriptionScope(
-        child: MaterialApp(
-          debugShowCheckedModeBanner: false,
-          title: 'NirapodClick',
-          theme: AppTheme.lightTheme,
-          // AuthGate listens to Firebase's auth state:
-          //   - while the cached session rehydrates, shows a branded splash
-          //   - resolves to HomePage when signed in (persistent login)
-          //   - resolves to LoginPage when signed out
-          home: const AuthGate(),
+        // FreeQuotaScope must be a descendant of SubscriptionScope
+        // so the quota service can listen for premium-state
+        // transitions. We grab the same SubscriptionService singleton
+        // here that FreeQuotaScope's descendants will see.
+        child: Builder(
+          builder: (context) {
+            // Make sure the quota service has the (now-built)
+            // subscription service in hand before any descendant
+            // tries to consume a check.
+            quotaService.attachSubscription(SubscriptionScope.of(context));
+            return FreeQuotaScope(
+              service: quotaService,
+              child: MaterialApp(
+                debugShowCheckedModeBanner: false,
+                title: 'NirapodClick',
+                theme: AppTheme.lightTheme,
+                // AuthGate listens to Firebase's auth state:
+                //   - while the cached session rehydrates, shows a branded splash
+                //   - resolves to HomePage when signed in (persistent login)
+                //   - resolves to LoginPage when signed out
+                home: const AuthGate(),
+              ),
+            );
+          },
         ),
       ),
     );
   }
+
+  // Module-level singleton for the quota service. Mirrors
+  // `SubscriptionScope._default` — keeps a single instance across
+  // rebuilds so quota counts aren't reset every time the root widget
+  // rebuilds (which happens on locale change).
+  static final FreeQuotaService _quotaSingleton = FreeQuotaService();
+
+  FreeQuotaService _ensureQuotaAttached() => _quotaSingleton;
 }

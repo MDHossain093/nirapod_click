@@ -1,19 +1,16 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/risk_result.dart';
+import '../models/scan_type.dart';
+import 'subscription_service.dart';
 
-/// What kind of scan produced this entry. Stored on the document so the
-/// history list can render the right icon/label without sniffing text.
-enum ScanType {
-  message,
-  url,
-  screenshot,
-  phone;
-
-  /// Stable wire name used in Firestore payloads + rules whitelist.
-  String get wire => name;
-}
+/// Re-export so existing callers (which historically imported
+/// `ScanType` from this file) keep compiling without a sweeping
+/// import-path edit. New code should import from
+/// `package:nirapod_click/models/scan_type.dart` directly.
+export '../models/scan_type.dart' show ScanType;
 
 /// Limits that match `firestore.rules`. Kept in one place so the client
 /// and the server agree on what's valid.
@@ -122,14 +119,48 @@ ScanType parseScanType(Object? raw) {
 ///     - createdAt: serverTimestamp
 class CheckerRepository {
   final FirebaseFirestore _db;
-  final String _uid;
+  final String? _uid;
 
   CheckerRepository({FirebaseFirestore? db, String? uid})
       : _db = db ?? FirebaseFirestore.instance,
-        _uid = uid ?? FirebaseAuth.instance.currentUser!.uid;
+        // Resolved lazily so the repository is safe to construct BEFORE a
+        // user has signed in (e.g. from `main()` while AuthGate is still
+        // deciding between the cached-session splash and LoginPage).
+        // Any call that actually needs the uid — save / watch / clear —
+        // re-reads `currentUser` at invocation time, which throws the
+        // same helpful "no user" StateError as the old `!` would, but
+        // only for the operation that needs a user rather than blocking
+        // the entire app launch.
+        _uid = uid ?? FirebaseAuth.instance.currentUser?.uid {
+    // Defensive: log the uid the repository will query under so we can
+    // diagnose "permission-denied" on Firestore reads — the most common
+    // cause is a stale ID token from a previous sign-in. The watcher
+    // below forces a token refresh on auth state changes, which cures
+    // the failure mode where the Flutter SDK kept a pre-revocation
+    // cached token (reads fail with `permission-denied` until the
+    // token is refreshed, which the SDK normally does lazily).
+    debugPrint('[CheckerRepository] uid=$_uid');
+  }
+
+  /// Resolves the uid on demand — falls back to the constructor-time
+  /// snapshot, but re-reads `currentUser` if that was null at construction.
+  /// Throws if no user is signed in at call time (the only way to make a
+  /// Firestore call under `users/{uid}/...` is to have a uid).
+  String get _resolvedUid {
+    final live = FirebaseAuth.instance.currentUser?.uid;
+    final uid = live ?? _uid;
+    if (uid == null) {
+      throw StateError(
+        'CheckerRepository requires a signed-in user. '
+        'Construct it after FirebaseAuth.instance.currentUser is non-null '
+        '(e.g. inside an auth-state listener) or pass `uid` explicitly.',
+      );
+    }
+    return uid;
+  }
 
   CollectionReference<Map<String, dynamic>> get _checks =>
-      _db.collection('users').doc(_uid).collection('checks');
+      _db.collection('users').doc(_resolvedUid).collection('checks');
 
   /// Save a scan from the message / SMS checker (the only caller that used
   /// to write). Kept as a thin alias for [saveScan] so older call sites keep
@@ -161,9 +192,24 @@ class CheckerRepository {
   /// Delete every check this user has ever saved. Used by the
   /// "Clear history" action on the history page. Batched in chunks of 450
   /// because of Firestore's 500-op per-batch ceiling.
+  ///
+  /// Also refunds the per-kind quota counter on the SubscriptionService
+  /// for every deleted doc so the Profile card's "X scans left" matches
+  /// the freshly-cleared history. We look up each doc's `type` field
+  /// before deleting so the refund targets the right counter; docs
+  /// without a `type` field (very old entries) fall back to `message`
+  /// — matching `parseScanType`'s default, so we're at least
+  /// internally consistent.
   Future<int> clearAll() async {
     final snap = await _checks.get();
     if (snap.docs.isEmpty) return 0;
+
+    // Capture the type before delete (Firestore hands us an immutable
+    // snapshot, so we can read `data` even after the doc is gone).
+    final typeById = <String, ScanType>{};
+    for (final doc in snap.docs) {
+      typeById[doc.id] = parseScanType(doc.data()['type']);
+    }
 
     const chunkSize = 450;
     var deleted = 0;
@@ -176,6 +222,65 @@ class CheckerRepository {
       await batch.commit();
       deleted += end - i;
     }
+    // Refund after the deletes commit so a refund that races an
+    // in-flight save (delete -> save -> refund) doesn't push the
+    // counter above the cap.
+    for (final t in typeById.values) {
+      await SubscriptionService.instance.refundScan(t);
+    }
+    return deleted;
+  }
+
+  /// Delete a single check by its document id. No-op if the doc doesn't
+  /// exist (Firestore treats `.delete()` on a missing doc as a no-op).
+  /// The home / history subscribers are Firestore snapshots streams so
+  /// they rebuild automatically once the delete commits.
+  Future<void> deleteOne(String checkId) async {
+    // Snapshot first so we know the type for the refund.
+    final doc = await _checks.doc(checkId).get();
+    if (doc.exists) {
+      await doc.reference.delete();
+      await SubscriptionService.instance
+          .refundScan(parseScanType(doc.data()?['type']));
+    } else {
+      await _checks.doc(checkId).delete();
+    }
+  }
+
+  /// Delete a specific set of checks in batches of 450. Used by the
+  /// "Select scans to delete" sheet on the Profile screen. Returns the
+  /// number of docs that were issued for deletion — Firestore's
+  /// `batch.commit()` doesn't distinguish "succeeded" from "no-op
+  /// missing doc", so we count what the caller asked for.
+  Future<int> deleteMany(Iterable<String> checkIds) async {
+    final ids = checkIds.toList(growable: false);
+    if (ids.isEmpty) return 0;
+
+    // Snapshot the docs we plan to delete so we can refund the
+    // correct kind for each. A `null` `get()` (already deleted by
+    // another path) is silently skipped — the refund is best-effort.
+    final typeById = <String, ScanType>{};
+    for (final id in ids) {
+      final doc = await _checks.doc(id).get();
+      if (doc.exists) {
+        typeById[id] = parseScanType(doc.data()?['type']);
+      }
+    }
+
+    const chunkSize = 450;
+    var deleted = 0;
+    for (var i = 0; i < ids.length; i += chunkSize) {
+      final end = (i + chunkSize).clamp(0, ids.length);
+      final batch = _db.batch();
+      for (final id in ids.sublist(i, end)) {
+        batch.delete(_checks.doc(id));
+      }
+      await batch.commit();
+      deleted += end - i;
+    }
+    for (final t in typeById.values) {
+      await SubscriptionService.instance.refundScan(t);
+    }
     return deleted;
   }
 
@@ -183,6 +288,10 @@ class CheckerRepository {
       QueryDocumentSnapshot<Map<String, dynamic>> d) {
     final data = d.data();
     return HistoryEntry(
+      // Firestore document id — used as a stable identity for cross-device
+      // read-state (see AlertService.seenIds). Not persisted anywhere
+      // outside the document itself.
+      checkId: d.id,
       result: deserializeCheck(data),
       originalText: (data['originalText'] as String?) ?? '',
       createdAt: data['createdAt'] as Object?,
@@ -197,11 +306,17 @@ class CheckerRepository {
 /// back from Firestore, or a server-sentinel when round-tripped locally).
 class HistoryEntry {
   const HistoryEntry({
+    required this.checkId,
     required this.result,
     required this.originalText,
     this.createdAt,
     this.type = ScanType.message,
   });
+
+  /// Firestore document id (`users/{uid}/checks/{checkId}`). Stable for
+  /// the lifetime of the document; used by the alert system to track
+  /// read-state in SharedPreferences.
+  final String checkId;
   final RiskResult result;
   final String originalText;
   final Object? createdAt;

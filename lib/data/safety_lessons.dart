@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 import '../models/safety_lesson.dart';
 
 /// Static safety lessons for the Learn Center.
@@ -13,7 +15,7 @@ const List<SafetyLesson> safetyLessons = [
     subtitleBn: 'আপনার যাচাইকরণ কোড সুরক্ষিত রাখুন',
     categoryEn: 'Payments',
     categoryBn: 'পেমেন্ট',
-    icon: '🔐',
+    iconData: Icons.lock_outline_rounded,
     minutes: 5,
     sections: [
       LessonSection(
@@ -69,7 +71,7 @@ const List<SafetyLesson> safetyLessons = [
     subtitleBn: 'সন্দেহজনক URL চিনতে শিখুন',
     categoryEn: 'Links',
     categoryBn: 'লিংক',
-    icon: '🔗',
+    iconData: Icons.link_rounded,
     minutes: 4,
     sections: [
       LessonSection(
@@ -124,7 +126,7 @@ const List<SafetyLesson> safetyLessons = [
     subtitleBn: 'নিয়োগ সংক্রান্ত প্রতারণা চিনুন',
     categoryEn: 'Jobs',
     categoryBn: 'চাকরি',
-    icon: '💼',
+    iconData: Icons.work_outline_rounded,
     minutes: 5,
     sections: [
       LessonSection(
@@ -159,7 +161,7 @@ const List<SafetyLesson> safetyLessons = [
     subtitleBn: 'আপনি যে প্রতিযোগিতায় অংশ নেননি তা জিততে পারেন না',
     categoryEn: 'Scams',
     categoryBn: 'প্রতারণা',
-    icon: '🎁',
+    iconData: Icons.card_giftcard_rounded,
     minutes: 4,
     sections: [
       LessonSection(
@@ -193,7 +195,7 @@ const List<SafetyLesson> safetyLessons = [
     subtitleBn: 'ফেসবুক ও মেসেজিং প্ল্যাটফর্মে নিরাপদ থাকুন',
     categoryEn: 'Social Media',
     categoryBn: 'সোশ্যাল মিডিয়া',
-    icon: '📱',
+    iconData: Icons.forum_rounded,
     minutes: 5,
     sections: [
       LessonSection(

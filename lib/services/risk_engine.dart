@@ -1,6 +1,32 @@
+import '../core/locale/localizer.dart';
+import '../data/default_scam_rules.dart';
 import '../models/risk_result.dart';
+import '../models/scam_rule.dart';
 
 class RiskEngine {
+  /// Construct an engine with an optional rule bundle.
+  ///
+  /// Defaults to [defaultScamRules] (the 6 rules bundled with the APK)
+  /// so existing callers — `RiskEngine()` and the eager
+  /// `_riskEngine = RiskEngine()` inside [HybridAnalyzer] — keep
+  /// working without any change to their constructor.
+  ///
+  /// Production code should pass the rules loaded by
+  /// [ScamRuleService] (Firestore with bundled fallback).
+  RiskEngine({List<ScamRule>? rules})
+      : _rules = rules ?? defaultScamRules;
+
+  /// Active rule bundle. The order doesn't matter — each rule is
+  /// independent — but we iterate it on every message so we keep it
+  /// small (≤ ~50 rules expected for v1).
+  final List<ScamRule> _rules;
+
+  /// Convenience handle to the context-free Localizer singleton.
+  /// The current locale is set by [AppLocaleScope.updateShouldNotify]
+  /// whenever the user picks a language, so the engine picks up the
+  /// right language on the next call without any explicit plumbing.
+  static final Localizer _loc = Localizer.instance;
+
   RiskResult analyzeMessage(String message) {
     final text = _normalize(message);
 
@@ -9,158 +35,32 @@ class RiskEngine {
     final categories = <String>[];
 
     // ─────────────────────────────────────
-    // 1. URGENCY
+    // 1–6. DATA-DRIVEN RULES
     // ─────────────────────────────────────
+    //
+    // Replaces the six separate keyword arrays that used to live
+    // here. The keyword lists, scores, categories, and human-readable
+    // reasons now live in [defaultScamRules] / Firestore
+    // `scam_patterns/{id}` and can be updated without rebuilding the
+    // app. The combinator rules further down still reference the
+    // matched categories by name, so the wiring is unchanged.
+    //
+    // We collect matched categories into a `Set` first and then copy
+    // them to the ordered `categories` list so the priority order in
+    // `_getCategory` (Credential Theft > Phishing > Payment Scam >
+    // Prize Scam > Job Scam > first non-empty) keeps working
+    // identically when a future ScamRule adds a new category.
 
-    final urgencyPatterns = [
-      'urgent',
-      'immediately',
-      'act now',
-      'right now',
-      'last chance',
-      'জরুরি',
-      'এখনই',
-      'তাড়াতাড়ি',
-      'অতি জরুরি',
-      'আজকের মধ্যে',
-    ];
-
-    if (_containsAny(text, urgencyPatterns)) {
-      score += 15;
-      reasons.add('Creates a sense of urgency');
-      categories.add('Urgency');
+    final matchedCategories = <String>{};
+    for (final rule in _rules) {
+      if (!rule.active) continue;
+      if (rule.keywords.any(text.contains)) {
+        score += rule.score;
+        reasons.add(_reasonFor(rule.category));
+        matchedCategories.add(rule.category);
+      }
     }
-
-    // ─────────────────────────────────────
-    // 2. PAYMENT
-    // ─────────────────────────────────────
-
-    final paymentPatterns = [
-      'send money',
-      'send payment',
-      'make payment',
-      'pay now',
-      'payment required',
-      'registration fee',
-      'processing fee',
-      'টাকা পাঠান',
-      'টাকা দিন',
-      'পেমেন্ট করুন',
-      'ফি দিন',
-      'রেজিস্ট্রেশন ফি',
-      'প্রসেসিং ফি',
-    ];
-
-    if (_containsAny(text, paymentPatterns)) {
-      score += 25;
-      reasons.add('Requests money or payment');
-      categories.add('Payment Scam');
-    }
-
-    // ─────────────────────────────────────
-    // 3. SENSITIVE INFORMATION
-    // ─────────────────────────────────────
-
-    final sensitivePatterns = [
-      'otp',
-      'one time password',
-      'pin',
-      'password',
-      'verification code',
-      'security code',
-      'ওটিপি',
-      'পিন',
-      'পাসওয়ার্ড',
-      'ভেরিফিকেশন কোড',
-      'সিকিউরিটি কোড',
-    ];
-
-    if (_containsAny(text, sensitivePatterns)) {
-      score += 30;
-      reasons.add(
-        'Requests sensitive authentication information',
-      );
-      categories.add('Credential Theft');
-    }
-
-    // ─────────────────────────────────────
-    // 4. PRIZE / LOTTERY
-    // ─────────────────────────────────────
-
-    final prizePatterns = [
-      'you won',
-      'you have won',
-      'winner',
-      'lottery',
-      'prize',
-      'reward',
-      'congratulations',
-      'পুরস্কার',
-      'লটারি',
-      'আপনি জিতেছেন',
-      'অভিনন্দন',
-      'পুরস্কার পেয়েছেন',
-    ];
-
-    if (_containsAny(text, prizePatterns)) {
-      score += 20;
-      reasons.add(
-        'Contains a prize or winning claim',
-      );
-      categories.add('Prize Scam');
-    }
-
-    // ─────────────────────────────────────
-    // 5. ACCOUNT THREATS
-    // ─────────────────────────────────────
-
-    final accountPatterns = [
-      'account blocked',
-      'account suspended',
-      'account will be closed',
-      'account disabled',
-      'verify your account',
-      'অ্যাকাউন্ট বন্ধ',
-      'অ্যাকাউন্ট ব্লক',
-      'অ্যাকাউন্ট বাতিল',
-      'অ্যাকাউন্ট স্থগিত',
-      'অ্যাকাউন্ট ভেরিফাই',
-    ];
-
-    if (_containsAny(text, accountPatterns)) {
-      score += 20;
-      reasons.add(
-        'Uses an account suspension or closure threat',
-      );
-      categories.add('Account Scam');
-    }
-
-    // ─────────────────────────────────────
-    // 6. JOB SCAM
-    // ─────────────────────────────────────
-
-    final jobPatterns = [
-      'work from home',
-      'easy income',
-      'earn money',
-      'part time job',
-      'online job',
-      'job opportunity',
-      'চাকরি',
-      'জব',
-      'ঘরে বসে আয়',
-      'অনলাইন কাজ',
-      'পার্ট টাইম',
-      'নিয়োগ',
-    ];
-
-    if (_containsAny(text, jobPatterns)) {
-      score += 15;
-      reasons.add(
-        'Contains possible job-offer scam indicators',
-      );
-      categories.add('Job Scam');
-    }
+    categories.addAll(matchedCategories);
 
     // ─────────────────────────────────────
     // 7. URL DETECTION
@@ -170,9 +70,7 @@ class RiskEngine {
 
     if (urls.isNotEmpty) {
       score += 15;
-      reasons.add(
-        'Contains a web link',
-      );
+      reasons.add(_loc.tr('reason.containsLink'));
       categories.add('Suspicious Link');
     }
 
@@ -182,9 +80,7 @@ class RiskEngine {
 
     if (_hasSuspiciousUrl(text)) {
       score += 20;
-      reasons.add(
-        'The link contains suspicious URL patterns',
-      );
+      reasons.add(_loc.tr('reason.suspiciousUrlPatterns'));
       categories.add('Phishing');
     }
 
@@ -195,9 +91,7 @@ class RiskEngine {
     final phoneNumbers = _extractBangladeshPhones(text);
 
     if (phoneNumbers.isNotEmpty) {
-      reasons.add(
-        'Contains a Bangladesh phone number',
-      );
+      reasons.add(_loc.tr('reason.bdPhoneNumber'));
     }
 
     // ─────────────────────────────────────
@@ -215,7 +109,7 @@ class RiskEngine {
       'brac',
       'visa',
       'tax',
-      'বাংলাদেশ ব্যাংক',
+      'বাংলাদেশ ব্যা�ক',
       'সরকার',
       'পুলিশ',
       'ব্যাংক',
@@ -223,13 +117,11 @@ class RiskEngine {
 
     if (_containsAny(text, organizationPatterns)) {
       if (urls.isNotEmpty ||
-          _containsAny(text, sensitivePatterns) ||
-          _containsAny(text, paymentPatterns)) {
+          matchedCategories.contains('Credential Theft') ||
+          matchedCategories.contains('Payment Scam')) {
         score += 15;
 
-        reasons.add(
-          'May be impersonating an organization or service',
-        );
+        reasons.add(_loc.tr('reason.orgImpersonation'));
 
         categories.add('Impersonation');
       }
@@ -238,44 +130,36 @@ class RiskEngine {
     // ─────────────────────────────────────
     // 11. COMBINATION RULES
     // ─────────────────────────────────────
+    //
+    // Combinators check the matched `categories` set populated by the
+    // data-driven loop above. This is the right seam: the combo fires
+    // when the corresponding ScamRules fired, regardless of how the
+    // admin reworded or rewrote the keywords.
 
-    final hasPayment =
-        _containsAny(text, paymentPatterns);
-
-    final hasSensitive =
-        _containsAny(text, sensitivePatterns);
-
-    final hasUrgency =
-        _containsAny(text, urgencyPatterns);
-
-    final hasPrize =
-        _containsAny(text, prizePatterns);
+    final hasPayment = matchedCategories.contains('Payment Scam');
+    final hasSensitive = matchedCategories.contains('Credential Theft');
+    final hasUrgency = matchedCategories.contains('Urgency');
+    final hasPrize = matchedCategories.contains('Prize Scam');
 
     // Payment + sensitive information
     if (hasPayment && hasSensitive) {
       score += 15;
 
-      reasons.add(
-        'Combines a payment request with sensitive information',
-      );
+      reasons.add(_loc.tr('reason.paymentPlusSensitive'));
     }
 
     // Urgency + URL
     if (hasUrgency && urls.isNotEmpty) {
       score += 10;
 
-      reasons.add(
-        'Uses urgency together with a web link',
-      );
+      reasons.add(_loc.tr('reason.urgencyPlusUrl'));
     }
 
     // Prize + payment
     if (hasPrize && hasPayment) {
       score += 15;
 
-      reasons.add(
-        'Requests payment related to a prize or reward',
-      );
+      reasons.add(_loc.tr('reason.prizePlusPayment'));
     }
 
     score = score.clamp(0, 100);
@@ -308,6 +192,67 @@ class RiskEngine {
         .toLowerCase()
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
+  }
+
+  // ─────────────────────────────────────────
+  // REASON LOOKUP
+  // ─────────────────────────────────────────
+  //
+  // Resolves the rule's `category` to a localized reason string via
+  // the context-free [Localizer] singleton. All entries live in
+  // `lib/core/locale/localizer.dart` under `reason.*`; English is
+  // the source of truth and Bangla falls back to English.
+  String _reasonFor(String category) {
+    switch (category) {
+      case 'Urgency':
+        return _loc.tr('reason.urgency');
+      case 'Payment Scam':
+        return _loc.tr('reason.paymentScam');
+      case 'Credential Theft':
+        return _loc.tr('reason.credentialTheft');
+      case 'Prize Scam':
+        return _loc.tr('reason.prizeScam');
+      case 'Account Scam':
+        return _loc.tr('reason.accountScam');
+      case 'Job Scam':
+        return _loc.tr('reason.jobScam');
+      // -- Bangladesh-specific categories (see default_scam_rules.dart).
+      // Each gets its own reason so the alert/history UI can explain
+      // exactly which signal tripped, instead of falling back to the
+      // generic "Matches a known scam pattern" string.
+      case 'KYC Update':
+        return _loc.tr('reason.kycUpdate');
+      case 'SIM Block Threat':
+        return _loc.tr('reason.simBlockThreat');
+      case 'Fake Courier':
+        return _loc.tr('reason.fakeCourier');
+      case 'Utility Bill':
+        return _loc.tr('reason.utilityBill');
+      case 'Govt Subsidy':
+        return _loc.tr('reason.govtSubsidy');
+      case 'Police Threat':
+        return _loc.tr('reason.policeThreat');
+      case 'Family Impersonation':
+        return _loc.tr('reason.familyImpersonation');
+      case 'Crypto Investment':
+        return _loc.tr('reason.cryptoInvestment');
+      case 'Romance':
+        return _loc.tr('reason.romance');
+      case 'Cashback Bonus':
+        return _loc.tr('reason.cashbackBonus');
+      case 'Freelance Job':
+        return _loc.tr('reason.freelanceJob');
+      case 'Microcredit Loan':
+        return _loc.tr('reason.microcreditLoan');
+      case 'E-commerce Refund':
+        return _loc.tr('reason.ecommerceRefund');
+      case 'Device Bait':
+        return _loc.tr('reason.deviceBait');
+      case 'OTP Share Request':
+        return _loc.tr('reason.otpShareRequest');
+      default:
+        return _loc.tr('reason.genericMatch');
+    }
   }
 
   // ─────────────────────────────────────────
@@ -444,7 +389,12 @@ class RiskEngine {
     }
 
     if (score >= 85) {
-      confidence += 0.05;
+      // Strong-score boost: a single critical-tier signal at score=85
+      // now lands at 0.80 (0.50 base + 0.10 [≥70] + 0.20) — exactly the
+      // AI gate threshold, so obvious scams resolve locally instead of
+      // hitting Gemini. Was +0.05 before this change, which left
+      // single-signal criticals at 0.65 → AI fallback unnecessarily.
+      confidence += 0.20;
     }
 
     return confidence.clamp(0.0, 0.99);
@@ -456,27 +406,27 @@ class RiskEngine {
 
   String _getCategory(List<String> categories) {
     if (categories.isEmpty) {
-      return 'General';
+      return _loc.tr('category.general');
     }
 
     if (categories.contains('Credential Theft')) {
-      return 'Credential Theft';
+      return _loc.tr('category.credentialTheft');
     }
 
     if (categories.contains('Phishing')) {
-      return 'Phishing';
+      return _loc.tr('category.phishing');
     }
 
     if (categories.contains('Payment Scam')) {
-      return 'Payment Scam';
+      return _loc.tr('category.paymentScam');
     }
 
     if (categories.contains('Prize Scam')) {
-      return 'Prize Scam';
+      return _loc.tr('category.prizeScam');
     }
 
     if (categories.contains('Job Scam')) {
-      return 'Job Scam';
+      return _loc.tr('category.jobScam');
     }
 
     return categories.first;
@@ -492,36 +442,36 @@ class RiskEngine {
     switch (level) {
       case RiskLevel.critical:
         return [
-          'Do not click any links.',
-          'Do not send money.',
-          'Never share OTP, PIN, or passwords.',
-          'Verify the claim through an official channel.',
+          _loc.tr('rec.critical.1'),
+          _loc.tr('rec.critical.2'),
+          _loc.tr('rec.critical.3'),
+          _loc.tr('rec.critical.4'),
         ];
 
       case RiskLevel.high:
         return [
-          'Avoid clicking links in the message.',
-          'Do not share sensitive information.',
-          'Verify the sender independently.',
+          _loc.tr('rec.high.msg.1'),
+          _loc.tr('rec.high.msg.2'),
+          _loc.tr('rec.high.msg.3'),
         ];
 
       case RiskLevel.medium:
         return [
-          'Be careful before responding.',
-          'Verify the sender or organization.',
-          'Avoid sharing personal information.',
+          _loc.tr('rec.medium.msg.1'),
+          _loc.tr('rec.medium.msg.2'),
+          _loc.tr('rec.medium.msg.3'),
         ];
 
       case RiskLevel.low:
         return [
-          'Stay cautious.',
-          'Verify important claims before taking action.',
+          _loc.tr('rec.low.msg.1'),
+          _loc.tr('rec.low.msg.2'),
         ];
 
       case RiskLevel.safe:
         return [
-          'No major warning signs were detected.',
-          'Continue to avoid sharing sensitive information.',
+          _loc.tr('rec.safe.msg.1'),
+          _loc.tr('rec.safe.msg.2'),
         ];
     }
   }

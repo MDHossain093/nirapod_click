@@ -1,6 +1,62 @@
+import '../core/locale/localizer.dart';
+import '../data/default_url_scam_rules.dart';
 import '../models/url_risk_result.dart';
+import '../models/url_scam_rule.dart';
 
 class UrlRiskEngine {
+  /// Convenience handle to the context-free Localizer singleton.
+  /// The current locale is set by [AppLocaleScope.updateShouldNotify]
+  /// whenever the user picks a language, so the engine picks up the
+  /// right language on the next call without any explicit plumbing.
+  static final Localizer _loc = Localizer.instance;
+
+  /// Active rule bundle. Defaults to the bundled
+  /// [defaultUrlScamRules]; the analyzer wires in the Firestore-loaded
+  /// bundle from [UrlScamRuleService] at construction time.
+  ///
+  /// The engine is intentionally **not** a singleton — the analyzer
+  /// rebuilds it per `analyzeUrl()` call so rule edits pushed via the
+  /// Firebase Console take effect on the very next scan, without
+  /// needing an app restart.
+  ///
+  /// (The raw list is bucketed once into [_byType] in the constructor
+  /// and not referenced directly after that — we don't store the
+  /// original list because every matcher path only needs its
+  /// type-specific bucket.)
+
+  /// Cached bucket view of the rule bundle keyed by [UrlScamRuleType].
+  /// Built once per engine instance so each analyze() call doesn't
+  /// have to re-filter the full list. With ~70 default rules this is a
+  /// few hundred bytes — negligible.
+  final Map<UrlScamRuleType, List<UrlScamRule>> _byType;
+
+  /// Construct an engine with an explicit rule bundle. Pass `null` to
+  /// use the bundled defaults — useful for tests that want to bypass
+  /// [UrlScamRuleService].
+  UrlRiskEngine({List<UrlScamRule>? rules})
+      : _byType = _bucketByType(rules ?? defaultUrlScamRules);
+
+  /// Empty bucket for [UrlScamRuleType]s with no rules. Declared once
+  /// so the matcher paths below can use `?? _emptyBucket` without
+  /// each call site paying a `const <UrlScamRule>[]` literal cost or
+  /// widening the inferred type to `List<dynamic>` (which would then
+  /// make `rule.score` resolve to `num` instead of `int`).
+  static const List<UrlScamRule> _emptyBucket = <UrlScamRule>[];
+
+  /// Group rules by their [UrlScamRuleType] so the matcher paths below
+  /// can iterate only the rules they care about. `active == false`
+  /// rules are dropped here so the engine never sees them.
+  static Map<UrlScamRuleType, List<UrlScamRule>> _bucketByType(
+    List<UrlScamRule> rules,
+  ) {
+    final out = <UrlScamRuleType, List<UrlScamRule>>{};
+    for (final r in rules) {
+      if (!r.active) continue;
+      out.putIfAbsent(r.type, () => <UrlScamRule>[]).add(r);
+    }
+    return out;
+  }
+
   UrlRiskResult analyze(String input) {
     final url = input.trim();
 
@@ -13,11 +69,11 @@ class UrlRiskEngine {
         level: UrlRiskLevel.safe,
         score: 0,
         confidence: 0.99,
-        category: 'Invalid',
+        category: _loc.tr('category.invalid'),
         url: url,
-        reasons: ['No URL was provided.'],
+        reasons: [_loc.tr('urlReason.noUrl')],
         recommendations: [
-          'Enter a valid website URL.',
+          _loc.tr('urlRec.invalid.1'),
         ],
       );
     }
@@ -30,14 +86,14 @@ class UrlRiskEngine {
     // HTTPS
     if (lowerUrl.startsWith('http://')) {
       score += 10;
-      reasons.add('The website does not use HTTPS.');
+      reasons.add(_loc.tr('urlReason.notHttps'));
       categories.add('Security');
     }
 
     // URL length
     if (url.length > 100) {
       score += 10;
-      reasons.add('The URL is unusually long.');
+      reasons.add(_loc.tr('urlReason.longUrl'));
       categories.add('Suspicious URL');
     }
 
@@ -49,9 +105,7 @@ class UrlRiskEngine {
 
     if (ipRegex.hasMatch(url)) {
       score += 25;
-      reasons.add(
-        'The link uses an IP address instead of a normal domain.',
-      );
+      reasons.add(_loc.tr('urlReason.ipAddress'));
       categories.add('Suspicious URL');
     }
 
@@ -59,30 +113,26 @@ class UrlRiskEngine {
     // A TLD match is weighted like a "Suspicious URL" rule but does
     // not by itself push the URL into Phishing territory — combined
     // with brand/keyword hits the combo rules will lift it further.
-    const suspiciousTlds = <String>[
-      '.tk', // Tokelau — historically one of the highest-abuse TLDs
-      '.ml', // Mali — same pattern as .tk (Freenom legacy)
-      '.cf', // Central African Republic — Freenom legacy
-      '.gq', // Equatorial Guinea — Freenom legacy
-      '.top', // generic .top — heavily abused in 2024–2025 phishing
-      '.xyz', // generic .xyz — high abuse rate, mixed legit
-      '.click', // punycode-like, almost exclusively phishing
-      '.country',
-    ];
-
-    final tldHit = suspiciousTlds.firstWhere(
-      (tld) => lowerUrl.endsWith(tld) ||
+    //
+    // The patterns themselves live in [defaultUrlScamRules] /
+    // Firestore `url_scam_rules`. Each pattern is matched as a suffix
+    // (with `tld/`, `tld?`, `tld#` for path/query/fragment contexts)
+    // so `example.tk/foo` matches `.tk`.
+    String? tldHit;
+    for (final rule in (_byType[UrlScamRuleType.tld] ?? _emptyBucket)) {
+      final tld = rule.pattern;
+      if (lowerUrl.endsWith(tld) ||
           lowerUrl.contains('$tld/') ||
           lowerUrl.contains('$tld?') ||
-          lowerUrl.contains('$tld#'),
-      orElse: () => '',
-    );
+          lowerUrl.contains('$tld#')) {
+        tldHit = tld;
+        break;
+      }
+    }
 
-    if (tldHit.isNotEmpty) {
-      score += 15;
-      reasons.add(
-        "Uses a frequently-abused top-level domain ($tldHit).",
-      );
+    if (tldHit != null) {
+      score += _scoreFor(_byType[UrlScamRuleType.tld]!, tldHit, defaultScore: 15);
+      reasons.add('${_loc.tr('urlReason.abuseTld')} ($tldHit)');
       categories.add('Suspicious Domain');
     }
 
@@ -90,84 +140,87 @@ class UrlRiskEngine {
     // commonly push .apk (fake banking apps), .exe (trojans), .zip /
     // .scr (packed malware). Match anywhere in the path so query
     // strings like "file.apk?download=1" still trip it.
-    const dangerousExtensions = <String>[
-      '.apk',
-      '.exe',
-      '.zip',
-      '.scr',
-      '.bat',
-      '.cmd',
-      '.jar',
-      '.iso',
-    ];
+    //
+    // Patterns from [defaultUrlScamRules] / Firestore `url_scam_rules`.
+    String? extHit;
+    for (final rule in (_byType[UrlScamRuleType.extension] ?? _emptyBucket)) {
+      if (lowerUrl.contains(rule.pattern)) {
+        extHit = rule.pattern;
+        break;
+      }
+    }
 
-    final extHit = dangerousExtensions.firstWhere(
-      (ext) => lowerUrl.contains(ext),
-      orElse: () => '',
-    );
-
-    if (extHit.isNotEmpty) {
-      score += 20;
-      reasons.add(
-        'Links directly to a downloadable executable file ($extHit).',
+    if (extHit != null) {
+      score += _scoreFor(
+        _byType[UrlScamRuleType.extension]!,
+        extHit,
+        defaultScore: 20,
       );
+      reasons.add('${_loc.tr('urlReason.dangerousExt')} ($extHit)');
       categories.add('Suspicious URL');
     }
 
-    // Suspicious keywords
-    final suspiciousKeywords = [
-      'login',
-      'verify',
-      'verification',
-      'secure',
-      'account',
-      'update',
-      'confirm',
-      'password',
-      'signin',
-      'wallet',
-      'claim',
-      'reward',
-      'prize',
-      'free',
-      'login',
-      'ভেরিফাই',
-      'অ্যাকাউন্ট',
-      'পুরস্কার',
-    ];
-
-    final matchedKeywords = suspiciousKeywords
-        .where(lowerUrl.contains)
-        .toList();
+    // Suspicious keywords — substring match against the lower-cased
+    // URL. Both English and Bangla patterns live in
+    // [defaultUrlScamRules] / Firestore `url_scam_rules` so admins
+    // can add BD phishing terms without an app release.
+    final matchedKeywords = <String>[];
+    int matchedKeywordScore = 0;
+    for (final rule in (_byType[UrlScamRuleType.keyword] ?? _emptyBucket)) {
+      if (lowerUrl.contains(rule.pattern)) {
+        matchedKeywords.add(rule.pattern);
+        matchedKeywordScore += rule.score;
+      }
+    }
 
     if (matchedKeywords.isNotEmpty) {
-      score += 15;
+      // Sum each matched rule's score. Admin-tuned scores override
+      // the historical flat 15 — typical values are still 15 per
+      // rule, but a high-confidence phrase like "otp" can be priced
+      // higher by an admin.
+      score += matchedKeywordScore;
 
-      reasons.add(
-        'Contains potentially sensitive or phishing-related terms.',
-      );
+      reasons.add(_loc.tr('urlReason.phishingTerms'));
 
       categories.add('Phishing');
     }
 
-    // URL shorteners
-    final shorteners = [
-      'bit.ly',
-      'tinyurl.com',
-      't.co',
-      'goo.gl',
-      'is.gd',
-      'cutt.ly',
-      'shorturl.at',
-    ];
+    // Foreign-TLD soft penalty: country-code TLDs (.ru, .cn, .ng)
+    // are heavily used by offshore scam operations but also by
+    // legitimate users (e.g. .ng for Nigerian diaspora). Penalise
+    // only when *combined with* another signal — this is what
+    // differentiates "user typing `example.ng`" from "scam-kit
+    // landing on .ng". Positioned AFTER the keyword/extension checks
+    // so `reasons` is already populated when we read it.
+    final foreignTlds = _byType[UrlScamRuleType.foreignTld] ?? _emptyBucket;
+    UrlScamRule? matchedForeignTld;
+    for (final r in foreignTlds) {
+      if (lowerUrl.endsWith(r.pattern) ||
+          lowerUrl.contains('${r.pattern}/') ||
+          lowerUrl.contains('${r.pattern}?') ||
+          lowerUrl.contains('${r.pattern}#')) {
+        matchedForeignTld = r;
+        break;
+      }
+    }
+    if (matchedForeignTld != null && reasons.isNotEmpty) {
+      score += matchedForeignTld.score;
+      reasons.add(_loc.tr('urlReason.foreignTld'));
+      categories.add('Suspicious Domain');
+    }
 
-    if (shorteners.any(lowerUrl.contains)) {
-      score += 20;
-
-      reasons.add(
-        'Uses a URL shortening service.',
-      );
-
+    // URL shorteners. Substring match against the lower-cased URL.
+    final shorteners = _byType[UrlScamRuleType.shortener] ?? _emptyBucket;
+    UrlScamRule? matchedShortener;
+    for (final r in shorteners) {
+      if (lowerUrl.contains(r.pattern)) {
+        matchedShortener = r;
+        break;
+      }
+    }
+    if (matchedShortener != null) {
+      score += matchedShortener.score;
+      reasons.add(_loc.tr('urlReason.shortener'));
       categories.add('Shortened URL');
     }
 
@@ -180,9 +233,7 @@ class UrlRiskEngine {
       if (dotCount >= 3) {
         score += 15;
 
-        reasons.add(
-          'The domain contains an unusually large number of subdomains.',
-        );
+        reasons.add(_loc.tr('urlReason.manySubdomains'));
 
         categories.add('Suspicious Domain');
       }
@@ -192,9 +243,7 @@ class UrlRiskEngine {
     if (url.contains('@')) {
       score += 25;
 
-      reasons.add(
-        'Contains an @ symbol that can hide the actual destination.',
-      );
+      reasons.add(_loc.tr('urlReason.atSymbol'));
 
       categories.add('Suspicious URL');
     }
@@ -203,38 +252,26 @@ class UrlRiskEngine {
     if (url.contains('//', 8)) {
       score += 10;
 
-      reasons.add(
-        'Contains an unusual URL structure.',
-      );
+      reasons.add(_loc.tr('urlReason.unusualStructure'));
 
       categories.add('Suspicious URL');
     }
 
-    // Brand impersonation patterns
-    final brands = [
-      'bkash',
-      'nagad',
-      'rocket',
-      'brac',
-      'dbbl',
-      'bank',
-      'paypal',
-      'facebook',
-      'google',
-      'microsoft',
-    ];
-
-    final brandMatched = brands.where(
-      lowerUrl.contains,
-    ).toList();
+    // Brand impersonation patterns. Each entry from
+    // [defaultUrlScamRules] / Firestore `url_scam_rules`.
+    final brands = _byType[UrlScamRuleType.brand] ?? _emptyBucket;
+    final brandMatched = <String>[];
+    int brandMatchedScore = 0;
+    for (final r in brands) {
+      if (lowerUrl.contains(r.pattern)) {
+        brandMatched.add(r.pattern);
+        brandMatchedScore += r.score;
+      }
+    }
 
     if (brandMatched.isNotEmpty) {
-      score += 10;
-
-      reasons.add(
-        'The URL contains a recognizable brand or service name.',
-      );
-
+      score += brandMatchedScore;
+      reasons.add(_loc.tr('urlReason.brandName'));
       categories.add('Possible Impersonation');
     }
 
@@ -243,20 +280,16 @@ class UrlRiskEngine {
         brandMatched.isNotEmpty) {
       score += 15;
 
-      reasons.add(
-        'A brand name appears together with phishing-related terms.',
-      );
+      reasons.add(_loc.tr('urlReason.brandPlusPhishing'));
 
       categories.add('Possible Impersonation');
     }
 
-    if (shorteners.any(lowerUrl.contains) &&
+    if (matchedShortener != null &&
         matchedKeywords.isNotEmpty) {
       score += 15;
 
-      reasons.add(
-        'A shortened URL contains sensitive or phishing-related terms.',
-      );
+      reasons.add(_loc.tr('urlReason.shortenerPlusPhishing'));
 
       categories.add('Phishing');
     }
@@ -297,6 +330,21 @@ class UrlRiskEngine {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Find the score the admin/Firestore assigned to a rule whose
+  /// pattern equals [matchedPattern]. Falls back to [defaultScore]
+  /// when no rule has that pattern — defensive against a future where
+  /// an admin deletes a doc but the bundled defaults still ship it.
+  static int _scoreFor(
+    List<UrlScamRule> bucket,
+    String matchedPattern, {
+    required int defaultScore,
+  }) {
+    for (final r in bucket) {
+      if (r.pattern == matchedPattern) return r.score;
+    }
+    return defaultScore;
   }
 
   UrlRiskLevel _getLevel(int score) {
@@ -343,7 +391,10 @@ class UrlRiskEngine {
     }
 
     if (score >= 80) {
-      confidence += 0.05;
+      // Strong-score boost: critical-tier URLs (≥80) with at least one
+      // other reason reach the 0.80 AI gate without calling Gemini.
+      // Single-signal criticals also clear the gate on score alone.
+      confidence += 0.20;
     }
 
     return confidence.clamp(0.0, 0.99);
@@ -351,23 +402,23 @@ class UrlRiskEngine {
 
   String _getCategory(List<String> categories) {
     if (categories.contains('Phishing')) {
-      return 'Phishing';
+      return _loc.tr('category.phishing');
     }
 
     if (categories.contains('Possible Impersonation')) {
-      return 'Impersonation';
+      return _loc.tr('category.impersonation');
     }
 
     if (categories.contains('Suspicious Domain')) {
-      return 'Suspicious Domain';
+      return _loc.tr('category.suspiciousDomain');
     }
 
     if (categories.contains('Shortened URL')) {
-      return 'Shortened URL';
+      return _loc.tr('category.shortenedLink');
     }
 
     if (categories.isEmpty) {
-      return 'General';
+      return _loc.tr('category.general');
     }
 
     return categories.first;
@@ -379,36 +430,36 @@ class UrlRiskEngine {
     switch (level) {
       case UrlRiskLevel.critical:
         return [
-          'Do not open this link.',
-          'Do not enter your password or OTP.',
-          'Do not provide payment information.',
-          'Verify the website through an official source.',
+          _loc.tr('rec.critical.url.1'),
+          _loc.tr('rec.critical.url.2'),
+          _loc.tr('rec.critical.url.3'),
+          _loc.tr('rec.critical.url.4'),
         ];
 
       case UrlRiskLevel.high:
         return [
-          'Avoid opening this link.',
-          'Do not enter sensitive information.',
-          'Verify the domain independently.',
+          _loc.tr('rec.high.url.1'),
+          _loc.tr('rec.high.url.2'),
+          _loc.tr('rec.high.url.3'),
         ];
 
       case UrlRiskLevel.medium:
         return [
-          'Proceed carefully.',
-          'Check the domain before entering information.',
-          'Avoid providing sensitive information.',
+          _loc.tr('rec.medium.url.1'),
+          _loc.tr('rec.medium.url.2'),
+          _loc.tr('rec.medium.url.3'),
         ];
 
       case UrlRiskLevel.low:
         return [
-          'The URL has some warning signs.',
-          'Verify the website before continuing.',
+          _loc.tr('rec.low.url.1'),
+          _loc.tr('rec.low.url.2'),
         ];
 
       case UrlRiskLevel.safe:
         return [
-          'No major warning signs were detected.',
-          'Always verify important websites independently.',
+          _loc.tr('rec.safe.url.1'),
+          _loc.tr('rec.safe.url.2'),
         ];
     }
   }

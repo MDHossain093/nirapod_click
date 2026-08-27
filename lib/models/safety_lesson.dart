@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 import '../core/locale/app_locale.dart';
 
 /// A single self-contained safety lesson displayed in the Learn Center.
@@ -24,9 +26,11 @@ class SafetyLesson {
   final String categoryEn;
   final String categoryBn;
 
-  /// Single emoji rendered inside the rounded badge (kept as a string so it
-  /// renders identically across platforms without needing an icon font).
-  final String icon;
+  /// Material icon rendered inside the rounded badge.
+  ///
+  /// Stored as an `IconData` so the const list of lessons can hold
+  /// real `Icons.*` constants directly (which are themselves const).
+  final IconData iconData;
 
   /// Estimated reading time, in minutes — shown on the card.
   final int minutes;
@@ -43,7 +47,7 @@ class SafetyLesson {
     required this.subtitleBn,
     required this.categoryEn,
     required this.categoryBn,
-    required this.icon,
+    required this.iconData,
     required this.minutes,
     required this.sections,
   });

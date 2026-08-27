@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../core/config/app_env.dart';
+import '../core/locale/app_locale.dart';
+import '../core/locale/localizer.dart';
 import '../models/risk_result.dart';
 import '../models/url_risk_result.dart';
 import 'screenshot_analyzer.dart';
@@ -113,7 +115,8 @@ class AiService {
       level: _parseRiskLevel(parsed['risk_level'] as String?),
       score: rawScore.clamp(0, 100),
       confidence: 0.90,
-      category: parsed['category'] as String? ?? 'General',
+      category: parsed['category'] as String? ??
+          Localizer.instance.tr('category.general'),
       reasons: _stringList(parsed['reasons']),
       recommendations: _stringList(parsed['recommendations']),
       usedAi: true,
@@ -173,7 +176,8 @@ class AiService {
       level: _parseUrlRiskLevel(parsed['risk_level'] as String?),
       score: rawScore.clamp(0, 100),
       confidence: 0.90,
-      category: parsed['category'] as String? ?? 'General',
+      category: parsed['category'] as String? ??
+          Localizer.instance.tr('category.general'),
       url: url,
       reasons: _stringList(parsed['reasons']),
       recommendations: _stringList(parsed['recommendations']),
@@ -242,7 +246,8 @@ class AiService {
       level: _parseRiskLevel(parsed['risk_level'] as String?),
       score: rawScore.clamp(0, 100),
       confidence: 0.90,
-      category: parsed['category'] as String? ?? 'General',
+      category: parsed['category'] as String? ??
+          Localizer.instance.tr('category.general'),
       reasons: _stringList(parsed['reasons']),
       recommendations: _stringList(parsed['recommendations']),
       usedAi: true,
@@ -296,7 +301,8 @@ class AiService {
           level: _parseUrlRiskLevel(entry['risk_level'] as String?),
           score: score.clamp(0, 100),
           confidence: 0.90,
-          category: (entry['category'] as String?) ?? 'Suspicious Link',
+          category: (entry['category'] as String?) ??
+              Localizer.instance.tr('category.suspiciousLink'),
           url: url,
           reasons: _stringList(entry['reasons']),
           recommendations: _stringList(entry['recommendations']),
@@ -359,6 +365,20 @@ class AiService {
     }
   }
 
+  /// Language directive appended to every Gemini prompt. When the user
+  /// has picked Bangla we ask Gemini to emit category names, reasons,
+  /// and recommendations in Bangla so the AI verdict reads natively
+  /// instead of falling back to English.
+  static String _languageDirective() {
+    final isBn = Localizer.instance.locale == AppLocale.bangla;
+    return isBn
+        ? '\n\nIMPORTANT — LANGUAGE:\n'
+            'Write all values for "category", "reasons", and '
+            '"recommendations" in Bangla (bn). Keep the JSON keys and '
+            '"risk_level" values in English exactly as shown above.'
+        : '';
+  }
+
   static String _buildMessagePrompt(String message) => '''
 You are NirapodClick, a digital safety assistant
 designed for users in Bangladesh.
@@ -411,7 +431,7 @@ recommendations should contain practical safety advice.
 Message to analyze:
 
 $message
-''';
+${_languageDirective()}''';
 
   static String _buildUrlPrompt(String url) => '''
 You are NirapodClick, a digital safety assistant
@@ -466,7 +486,7 @@ recommendations should contain practical safety advice.
 URL to analyze:
 
 $url
-''';
+${_languageDirective()}''';
 
   static String _buildScreenshotPrompt(String text) => '''
 You are NirapodClick, a digital safety assistant
@@ -542,5 +562,5 @@ in the text. If no links are present, return an empty array.
 Extracted screenshot text:
 
 $text
-''';
+${_languageDirective()}''';
 }

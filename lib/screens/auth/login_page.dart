@@ -272,18 +272,48 @@ class _LoginForm extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          ElevatedButton(
-            onPressed: anyBusy ? null : onSubmitEmail,
-            child: busy
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Text('Login'),
+          // Brand-gradient primary CTA — same `primary → secondary`
+          // gradient used by the in-app AppBar / Subscription card /
+          // Home "Go Premium" banner. Wrapping the ElevatedButton in a
+          // Container with BoxDecoration(gradient: …) lets the gradient
+          // show through (the button itself is transparent so its
+          // own backgroundColor / foregroundColor never overrides it).
+          Container(
+            decoration: BoxDecoration(
+              gradient: AppTheme.headerGradient,
+              borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            ),
+            child: ElevatedButton(
+              onPressed: anyBusy ? null : onSubmitEmail,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.white,
+                shadowColor: Colors.transparent,
+                disabledBackgroundColor: Colors.transparent,
+                disabledForegroundColor: Colors.white70,
+                // Inherit the full-width + height from the theme but
+                // strip the theme's own backgroundColor/foregroundColor
+                // overrides so the gradient + white text show through.
+                minimumSize: const Size(double.infinity, 52),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              child: busy
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Login'),
+            ),
           ),
           if (error != null) ...[
             const SizedBox(height: 16),
@@ -304,10 +334,10 @@ class _LoginForm extends StatelessWidget {
             label: const Text('Continue with Google'),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 14),
-              foregroundColor: const Color(0xFF172033),
-              side: const BorderSide(color: Color(0xFFD7DEE8), width: 1.2),
+              foregroundColor: AppTheme.textPrimary,
+              side: const BorderSide(color: AppTheme.borderSubtle, width: 1.2),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
               ),
             ),
           ),
@@ -315,9 +345,16 @@ class _LoginForm extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text(
-                "Don't have an account? ",
-                style: TextStyle(color: AppTheme.textSecondary),
+              // Localized Bangla strings can run ~200 dp wide; on a
+              // 320 dp phone with default padding the row overflows.
+              // Flexible + ellipsis keeps both pieces on one line.
+              Flexible(
+                child: const Text(
+                  "Don't have an account? ",
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
               ),
               TextButton(
                 onPressed: anyBusy

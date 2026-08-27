@@ -1,3 +1,4 @@
+import '../core/locale/localizer.dart';
 import '../models/phone_risk_result.dart';
 
 /// Pure-Dart rule engine for the Phone Number Checker.
@@ -24,6 +25,12 @@ import '../models/phone_risk_result.dart';
 /// Level buckets: 0-14 safe, 15-34 low, 35-59 medium, 60-79 high,
 /// 80-100 critical.
 class PhoneRiskEngine {
+  /// Convenience handle to the context-free Localizer singleton.
+  /// The current locale is set by [AppLocaleScope.updateShouldNotify]
+  /// whenever the user picks a language, so the engine picks up the
+  /// right language on the next call without any explicit plumbing.
+  static final Localizer _loc = Localizer.instance;
+
   PhoneRiskResult analyze(
     String input, {
     int reportCount = 0,
@@ -38,12 +45,12 @@ class PhoneRiskEngine {
       return PhoneRiskResult(
         phoneNumber: phone,
         isValid: false,
-        operator: 'Unknown',
+        operator: _loc.tr('phoneOperator.unknown'),
         level: PhoneRiskLevel.safe,
         score: 0,
         reportCount: reportCount,
-        reasons: const [
-          'This does not appear to be a valid Bangladesh mobile number.',
+        reasons: [
+          _loc.tr('phoneReason.invalidNumber'),
         ],
         recommendations: const [
           'Check the number and try again.',
@@ -58,40 +65,38 @@ class PhoneRiskEngine {
     // -- Community reports --
     if (reportCount >= 1) {
       score += 20;
-      reasons.add('This number has been reported by users.');
+      reasons.add(_loc.tr('phoneReason.oneReport'));
     }
 
     if (reportCount >= 3) {
       score += 15;
-      reasons.add('Multiple users have reported this number.');
+      reasons.add(_loc.tr('phoneReason.multipleReports'));
     }
 
     if (reportCount >= 10) {
       score += 20;
-      reasons.add('This number has received many reports.');
+      reasons.add(_loc.tr('phoneReason.manyReports'));
     }
 
     // -- Report categories --
     if (reportTypes.contains('scam')) {
       score += 20;
-      reasons.add('Users have reported possible scam activity.');
+      reasons.add(_loc.tr('phoneReason.scamReports'));
     }
 
     if (reportTypes.contains('payment')) {
       score += 20;
-      reasons.add('Users have reported payment-related activity.');
+      reasons.add(_loc.tr('phoneReason.paymentReports'));
     }
 
     if (reportTypes.contains('otp')) {
       score += 25;
-      reasons.add(
-        'Users have reported requests for OTP or verification codes.',
-      );
+      reasons.add(_loc.tr('phoneReason.otpReports'));
     }
 
     if (reportTypes.contains('job')) {
       score += 15;
-      reasons.add('Users have reported suspicious job offers.');
+      reasons.add(_loc.tr('phoneReason.jobReports'));
     }
 
     score = score.clamp(0, 100);
@@ -113,7 +118,7 @@ class PhoneRiskEngine {
   }
 
   /// Strips whitespace, dashes, parens, and the +88 / 88 country code
-  /// prefix. The remainder should be a 11-digit number starting with
+  /// prefix. The remainder should be an 11-digit number starting with
   /// `01` for [_isValidBangladeshNumber] to accept it.
   String _normalize(String input) {
     var phone = input.replaceAll(RegExp(r'[\s\-()]'), '');
@@ -137,9 +142,11 @@ class PhoneRiskEngine {
   }
 
   /// Maps the 3-digit prefix to a brand. Centralized so it can be
-  /// updated if BTRC reassigns blocks.
+  /// updated if BTRC reassigns blocks. Operator names stay in English
+  /// because they're proper nouns (brand names) — same convention as
+  /// the rest of the app for things like "bKash" / "Nagad".
   String _getOperator(String phone) {
-    if (phone.length < 3) return 'Unknown';
+    if (phone.length < 3) return _loc.tr('phoneOperator.unknown');
 
     final prefix = phone.substring(0, 3);
 
@@ -153,7 +160,7 @@ class PhoneRiskEngine {
       '015': 'Teletalk',
     };
 
-    return operators[prefix] ?? 'Unknown';
+    return operators[prefix] ?? _loc.tr('phoneOperator.unknown');
   }
 
   PhoneRiskLevel _getLevel(int score) {
@@ -167,31 +174,31 @@ class PhoneRiskEngine {
   List<String> _getRecommendations(PhoneRiskLevel level) {
     switch (level) {
       case PhoneRiskLevel.critical:
-        return const [
-          'Do not send money to this number.',
-          'Do not share OTP, PIN, or passwords.',
-          'Avoid calling back if you do not know the caller.',
-          'Consider blocking and reporting the number.',
+        return [
+          _loc.tr('rec.critical.phone.1'),
+          _loc.tr('rec.critical.phone.2'),
+          _loc.tr('rec.critical.phone.3'),
+          _loc.tr('rec.critical.phone.4'),
         ];
       case PhoneRiskLevel.high:
-        return const [
-          'Be extremely careful when communicating.',
-          'Do not share sensitive information.',
-          'Verify the caller independently.',
+        return [
+          _loc.tr('rec.high.phone.1'),
+          _loc.tr('rec.high.phone.2'),
+          _loc.tr('rec.high.phone.3'),
         ];
       case PhoneRiskLevel.medium:
-        return const [
-          'Proceed with caution.',
-          'Do not share financial or personal information.',
+        return [
+          _loc.tr('rec.medium.phone.1'),
+          _loc.tr('rec.medium.phone.2'),
         ];
       case PhoneRiskLevel.low:
-        return const [
-          'Stay cautious if you do not recognize this number.',
+        return [
+          _loc.tr('rec.low.phone.1'),
         ];
       case PhoneRiskLevel.safe:
-        return const [
-          'No suspicious reports were found.',
-          'Still avoid sharing OTP, PIN, or passwords.',
+        return [
+          _loc.tr('rec.safe.phone.1'),
+          _loc.tr('rec.safe.phone.2'),
         ];
     }
   }

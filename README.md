@@ -158,12 +158,12 @@ It will resize into every `mipmap-*/ic_launcher.png`, write the adaptive-icon fo
 
 ### 7. Env-switch cheatsheet
 
-| What                              | Dev                          | Prod                                |
-|-----------------------------------|------------------------------|-------------------------------------|
-| `firebase_options.dart`           | from dev project             | regenerate with `flutterfire configure --project=nirapodclick-prod` |
-| Firestore mode                    | test mode (30-day expiry)    | **production rules** (deploy ours)  |
-| API keys                          | dev project                  | prod project (locked by API restrictions) |
-| Android `applicationId`            | `com.example.nirapodclick`   | your real package name              |
+|| What                              | Dev                          | Prod                                |
+||-----------------------------------|------------------------------|-------------------------------------|
+|| `firebase_options.dart`           | from dev project             | regenerate with `flutterfire configure --project=nirapodclick-prod` |
+|| Firestore mode                    | test mode (30-day expiry)    | **production rules** (deploy ours)  |
+|| API keys                          | dev project                  | prod project (locked by API restrictions) |
+|| Android `applicationId`            | `com.example.nirapodclick`   | your real package name              |
 
 ### 8. CI guardrails
 
@@ -177,12 +177,71 @@ firebase emulators:exec --only firestore "node firestore.rules.test.js"
 
 A red light on any of these should block the release tag.
 
+## Reference data collections (manual seeding)
+
+Two collections are **read by all users** but only writable from privileged environments. They follow the same fail-soft pattern in the client (4-second timeout, returns `[]` on offline / permission-denied / timeout).
+
+### `scam_patterns/{ruleId}` — rule engine
+
+See `lib/data/default_scam_rules.dart` for the full schema. Summary:
+
+```jsonc
+{
+  "id": "msg-bkash-pin-en-bn-v1",
+  "category": "message",                  // "message" | "url" | "phone"
+  "lang": "en-bn",                        // or "en" / "bn"
+  "weight": 35,                           // 0-100 contribution to risk score
+  "patterns": ["share your bkash pin", "bikash pin দিন"],
+  "titleEn": "BKash PIN request",
+  "titleBn": "বিকাশ পিন চাওয়া",
+  "reasonEn": "No legitimate agent will ever ask for your PIN.",
+  "reasonBn": "কোনো বৈধ প্রতিনিধি কখনো আপনার পিন চাইবে না।",
+  "actionEn": "Never share your PIN. Hang up.",
+  "actionBn": "পিন কখনো শেয়ার করবেন না। কল কেটে দিন।",
+  "version": 1,
+  "active": true
+}
+```
+
+To deploy rules, paste documents into the Firebase Console under `scam_patterns/`. The client will pick them up on next refresh (or app restart).
+
+### `admin_alerts/{alertId}` — official safety alerts
+
+Admins (UIDs listed in `lib/core/auth/admin_uids.dart`) can compose and preview alerts from inside the app under **Profile → Admin → Safety alerts**. Because Firestore rules deny client writes to this collection (any unauthenticated user could otherwise forge "official" warnings), v1 publishes through the Firebase Console. The admin screen prepares a draft, copies the JSON, and you paste it into the Console to ship.
+
+```jsonc
+{
+  "titleEn": "New wave of bKash PIN phishing calls",
+  "titleBn": "বিকাশ পিন ফিশিং কলের নতুন ঢেউ",
+  "bodyEn":  "Scammers are impersonating bKash agents and asking for your PIN. bKash will never call you for your PIN.",
+  "bodyBn":  "প্রতারকরা বিকাশ প্রতিনিধি সেজে আপনার পিন চাইছে। বিকাশ কখনো ফোনে পিন চায় না।",
+  "severity": "warning",                  // "info" | "warning" | "critical"
+  "active": true,
+  "version": 1,
+  "updatedAt": <firestore-timestamp>
+}
+```
+
+Publishing workflow:
+
+1. Open the app as an admin, go to **Profile → Admin → Safety alerts → Publish alert**.
+2. Fill the form, preview the card, tap **Prepare draft** — JSON is on the clipboard.
+3. Firebase Console → Firestore → `admin_alerts` → **Add document** → paste → publish.
+4. All clients refresh within a few seconds (or on next app foreground).
+
+To retire an alert, flip `active: false` in the Console. The client filters on `active == true` server-side.
+
+### Future: write from inside the app
+
+A Cloud Function (Blaze tier) reading `kAdminUids` will replace the clipboard step. Until then, the rule "client writes to `admin_alerts` are denied" is the security floor — do not weaken it in `firestore.rules`.
+
 ## Roadmap (not yet built)
 
 - Gemini Cloud Function for second-opinion verdicts (merged with local score)
 - Phone-number sign-in
 - Share-intent receiver (Android) so users can paste from any app
 - Push notifications for new known scam patterns
+- Cloud Function so admins can publish `admin_alerts` without the Firebase Console
 - Admin console for curating the rule list without a release
 
 ## A note on the rule engine

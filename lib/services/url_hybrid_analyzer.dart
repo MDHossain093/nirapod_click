@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../models/url_risk_result.dart';
 import 'ai_service.dart';
 import 'url_risk_engine.dart';
+import 'url_scam_rule_service.dart';
 
 /// Local-first, AI-fallback analyzer for URLs.
 ///
@@ -12,17 +13,25 @@ import 'url_risk_engine.dart';
 ///   3. Otherwise call [AiService.analyzeUrl] and return the AI result.
 ///   4. On any AI exception, fall back to the local verdict silently.
 ///
-/// `AiService` is injected so unit tests can swap a fake. The engine is
-/// cheap (pure-Dart) so we construct it eagerly.
+/// `AiService` is injected so unit tests can swap a fake. The engine
+/// is cheap (pure-Dart) and we construct it **lazily inside each
+/// analyzeUrl() call** so a rule-bundle reload from
+/// [UrlScamRuleService] takes effect on the very next scan without an
+/// app restart.
 class UrlHybridAnalyzer {
   UrlHybridAnalyzer({AiService? aiService})
       : _aiService = aiService ?? AiService();
 
   final AiService _aiService;
-  final UrlRiskEngine _engine = UrlRiskEngine();
 
   Future<UrlRiskResult> analyzeUrl(String url) async {
-    final local = _engine.analyze(url);
+    // Resolve the rule bundle lazily on every analyze call so that
+    // hot-restart and code-push scenarios where [UrlScamRuleService]
+    // is re-seeded mid-session still pick up the latest bundle. The
+    // getter is O(1) (cache hit after first load).
+    final local = UrlRiskEngine(
+      rules: UrlScamRuleService.instance.rules,
+    ).analyze(url);
 
     if (local.confidence >= 0.80) {
       debugPrint(
@@ -34,12 +43,16 @@ class UrlHybridAnalyzer {
 
     debugPrint(
       '[Hybrid-URL] Local confidence '
-      '${(local.confidence * 100).toStringAsFixed(0)}% — '
-      'asking Gemini for a second opinion.',
+      '${(local.confidence * 100).toStringAsFixed(0)}% < 80% '
+      '— calling Gemini.',
     );
 
     try {
       final ai = await _aiService.analyzeUrl(url);
+      debugPrint(
+        '[Hybrid-URL] Gemini returned '
+        '${ai.level.name} (${ai.score}/100).',
+      );
       return ai;
     } catch (e, st) {
       debugPrint(

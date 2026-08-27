@@ -2,19 +2,20 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/locale/app_locale.dart';
+import '../../core/locale/localizer.dart';
+import '../../core/safety_score.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/checker_repository.dart';
+import '../../services/free_quota_service.dart';
 import '../../services/history_service.dart';
 import '../../services/subscription_service.dart';
+import '../../widgets/alert_badge_bell.dart';
+import '../../widgets/header_plan_toggle.dart';
 import '../../widgets/language_toggle.dart';
 import '../check/check_screen.dart';
 import '../history/history_page.dart';
 import '../learn/learn_screen.dart';
-import '../message_checker/message_checker_screen.dart';
-import '../phone_checker/phone_checker_screen.dart';
-import '../screenshot_scanner/screenshot_scanner_screen.dart';
 import '../subscription/premium_screen.dart';
-import '../url_checker/url_checker_screen.dart';
 
 /// NirapodClick post-login dashboard.
 ///
@@ -23,13 +24,25 @@ import '../url_checker/url_checker_screen.dart';
 /// home tab body.
 ///
 /// Layout (top -> bottom):
-///   1. Greeting header   - `Good Morning, <name>` + bell + EN/BN toggle.
+///   1. Greeting header   - `Good Morning, <name>` + tagline (big) +
+///                          bell + EN/BN toggle + plan badge. The inline
+///                          "X of 5 free checks" line under the tagline
+///                          is itself tappable for free users and routes
+///                          to PremiumScreen.
 ///   2. Hero CTA card     - "Is something suspicious?" -> CheckScreen.
-///   3. Quick Check grid  - 2x2 actionable tiles (Message / Link /
-///                          Screenshot / Number).
-///   4. Learn tile        - secondary CTA into the Safety Learning Center.
-///   5. Recent Scans      - last 3 entries from [HistoryService] with a
-///                          "View all" link into the History page.
+///                          Stacked inside the gradient, so it never
+///                          overflows on narrow screens. This is the
+///                          primary entry point into the 4 scanners;
+///                          the Check tab in the bottom nav is the
+///                          second one, so we don't repeat the CTA
+///                          further down the dashboard.
+///   3. Safety Score card - 0-100 score for the last 30 days + 4-pill
+///                          breakdown (critical/high/medium/safe). Tap
+///                          routes to History.
+///   4. Recent Scans      - last 3 entries from [HistoryService] with an
+///                          inline "View all" link in the section header.
+///   5. Learn tile        - secondary CTA into the Safety Learning Center.
+///   6. Go Premium banner - amber gradient row (free users only).
 ///
 /// Every user-facing string flows through `AppLocaleScope.tr(...)`.
 class HomePage extends StatelessWidget {
@@ -53,24 +66,22 @@ class HomePage extends StatelessWidget {
         child: CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 100),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   _buildHeader(context, scope, firstName),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 22),
                   _buildHeroCta(context),
                   const SizedBox(height: 24),
-                  _buildSectionTitle(context, t('home.recentScansTitle')),
+                  _buildSafetyScoreCard(context),
+                  const SizedBox(height: 32),
+                  _buildRecentScansHeader(context),
                   const SizedBox(height: 12),
-                  _buildRecentScans(context),
-                  const SizedBox(height: 28),
-                  _buildSectionTitle(context, t('home.section.check')),
-                  const SizedBox(height: 16),
-                  _buildQuickCheckGrid(context),
-                  const SizedBox(height: 20),
-                  _buildGoPremiumBanner(context),
-                  const SizedBox(height: 20),
+                  _buildRecentScansList(context),
+                  const SizedBox(height: 24),
                   _buildLearnTile(context),
+                  const SizedBox(height: 16),
+                  _buildGoPremiumBanner(context),
                 ]),
               ),
             ),
@@ -88,141 +99,346 @@ class HomePage extends StatelessWidget {
     String firstName,
   ) {
     final t = scope.tr;
-    final service = SubscriptionScope.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${t('home.greeting')} $firstName',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    t('app.tagline'),
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            _BellButton(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    behavior: SnackBarBehavior.floating,
-                    content: Text(t('home.noAlerts')),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(width: 10),
-            LanguageToggle(
-              value: scope.locale == AppLocale.bangla
-                  ? CopyLanguage.bangla
-                  : CopyLanguage.english,
-              onChanged: (next) {
-                scope.onChanged(
-                  next == CopyLanguage.bangla
-                      ? AppLocale.bangla
-                      : AppLocale.english,
-                );
-              },
-            ),
+    final subscription = SubscriptionScope.of(context);
+    final quota = FreeQuotaScope.of(context);
+    final now = DateTime.now();
+    final hour = now.hour;
+    // Time-of-day partition (24h):
+    //   05–11  morning
+    //   12–16  afternoon
+    //   17–20  evening
+    //   21–04  night
+    // Boundaries chosen so the greeting matches user expectation
+    // (early-evening/late-night users never see "Good Morning").
+    final String greetingKey;
+    final String greetingEmoji;
+    if (hour >= 5 && hour <= 11) {
+      greetingKey = 'home.greeting.morning';
+      greetingEmoji = '🌅';
+    } else if (hour >= 12 && hour <= 16) {
+      greetingKey = 'home.greeting.afternoon';
+      greetingEmoji = '☀️';
+    } else if (hour >= 17 && hour <= 20) {
+      greetingKey = 'home.greeting.evening';
+      greetingEmoji = '🌇';
+    } else {
+      greetingKey = 'home.greeting.night';
+      greetingEmoji = '🌙';
+    }
+    return Container(
+      // Tinted hero strip behind the header — gives it depth without
+      // a flat blue slab. Stays consistent with the gradient surfaces
+      // elsewhere (Hero CTA, premium banner) but very faint, so the
+      // bell + language toggle read on top of it unchanged.
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFEAF1FB),
+            Color(0xFFE2F4F1),
           ],
         ),
-        const SizedBox(height: 14),
-        _SubscriptionChip(service: service),
-      ],
+        borderRadius: BorderRadius.circular(AppTheme.radiusHero),
+        border: Border.all(color: AppTheme.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Row 1 — bell + language toggle on the left, plan badge
+          // pinned to the right corner. The plan badge mirrors the
+          // language toggle visually so the two pills read as a
+          // matching pair. Tapping the FREE badge routes to
+          // PremiumScreen as a convenience for users who want to
+          // upgrade; the PREMIUM badge has no tap action (you're
+          // already in).
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const AlertBadgeBell(),
+              const SizedBox(width: 8),
+              LanguageToggle(
+                value: scope.locale == AppLocale.bangla
+                    ? CopyLanguage.bangla
+                    : CopyLanguage.english,
+                onChanged: (next) {
+                  scope.onChanged(
+                    next == CopyLanguage.bangla
+                        ? AppLocale.bangla
+                        : AppLocale.english,
+                  );
+                },
+              ),
+              // Spacer pushes the plan badge to the right edge.
+              const Spacer(),
+              AnimatedBuilder(
+                animation: subscription,
+                builder: (context, _) {
+                  final isPremium = subscription.state.isPremium;
+                  return HeaderPlanBadge(
+                    plan: isPremium
+                        ? HeaderPlan.premium
+                        : HeaderPlan.free,
+                    // Free users can tap the badge to upgrade;
+                    // premium users don't need a tap target here
+                    // (the badge is purely informational).
+                    onTap: isPremium
+                        ? null
+                        : () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const PremiumScreen(),
+                              ),
+                            ),
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Row 2 — emoji + greeting line. Locale picks morning /
+          // afternoon / evening / night so it never says "Good
+          // Morning" past 11am.
+          Row(
+            children: [
+              Text(
+                greetingEmoji,
+                style: const TextStyle(fontSize: 22),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '${t(greetingKey)} $firstName',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Row 3 — tagline, slightly larger and tighter than before.
+          Text(
+            t('app.tagline'),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.textPrimary,
+              height: 1.1,
+              letterSpacing: -0.6,
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Row 4 — inline "X of 5 free checks used this month"
+          // line. Sits below the tagline so the user sees both the
+          // brand promise ("Stay safe online") and the concrete
+          // remaining-budget number without having to scroll. The
+          // text swaps to "Unlimited · Premium" when the user is
+          // premium so the same slot serves both audiences without
+          // a separate chip.
+          AnimatedBuilder(
+            animation: Listenable.merge([subscription, quota]),
+            builder: (context, _) {
+              final isPremium = subscription.state.isPremium;
+              final fmt = AppLocaleScope.of(context).formatNumber;
+              final String line;
+              final Color lineColor;
+              if (isPremium) {
+                line = t('home.headerQuota.unlimited');
+                lineColor = AppTheme.success;
+              } else {
+                final used = quota.used;
+                line = t('home.headerQuota.inline')
+                    .replaceAll('{used}', fmt(used));
+                lineColor = used >= quota.monthlyBudget
+                    ? AppTheme.danger
+                    : AppTheme.textSecondary;
+              }
+              // Free users can tap the inline quota line to jump
+              // straight to the Premium screen — it's the only
+              // free-tier affordance on the home screen now that the
+              // full-width quota pill has been removed, so it has to
+              // both communicate the budget and route to the
+              // upgrade surface. Premium users see the same line
+              // but it's not pressable (they're already premium).
+              final content = Row(
+                children: [
+                  Icon(
+                    isPremium
+                        ? Icons.verified_rounded
+                        : Icons.event_available_rounded,
+                    size: 14,
+                    color: lineColor,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      line,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: lineColor,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.1,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                  if (!isPremium) ...[
+                    const SizedBox(width: 6),
+                    Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 14,
+                      color: lineColor,
+                    ),
+                  ],
+                ],
+              );
+              if (isPremium) return content;
+              return _Pressable(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const PremiumScreen(),
+                  ),
+                ),
+                child: content,
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 
-  // -- Hero CTA --
+  // -- Hero CTA (stacked, never overflows) --
 
   Widget _buildHeroCta(BuildContext context) {
     final t = AppLocaleScope.of(context).tr;
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(24),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const CheckScreen()),
-        ),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [AppTheme.primary, AppTheme.secondary],
+    return _Pressable(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const CheckScreen()),
+      ),
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          // Brand header gradient token — same `primary → secondary`
+          // as the AppBar + Go Premium + Profile upsell + check CTAs.
+          gradient: AppTheme.headerGradient,
+          borderRadius: BorderRadius.circular(AppTheme.radiusHero),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primary.withValues(alpha: 0.30),
+              blurRadius: 26,
+              offset: const Offset(0, 14),
             ),
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Row(
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppTheme.radiusHero),
+          child: Stack(
             children: [
-              const Icon(Icons.shield_rounded,
-                  size: 44, color: Colors.white),
-              const SizedBox(width: 16),
-              Expanded(
+              // Decorative glow circles - purely cosmetic depth.
+              Positioned(
+                right: -50,
+                top: -60,
+                child: Container(
+                  width: 200,
+                  height: 200,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.07),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: -30,
+                bottom: -40,
+                child: Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.05),
+                  ),
+                ),
+              ),
+              // Stacked content - no Row means no horizontal overflow.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 22, 22, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.shield_rounded,
+                        size: 26,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     Text(
                       t('home.heroTitle'),
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        height: 1.2,
+                        letterSpacing: -0.3,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Text(
                       t('home.heroSubtitle'),
                       style: const TextStyle(
                         color: Colors.white70,
-                        fontSize: 13,
-                        height: 1.3,
+                        fontSize: 14,
+                        height: 1.4,
                       ),
                     ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      t('home.ctaCheckNow'),
-                      style: const TextStyle(
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
+                    const SizedBox(height: 18),
+                    // Full-width CTA so it's never clipped.
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    const Icon(
-                      Icons.arrow_forward_rounded,
-                      color: AppTheme.primary,
-                      size: 16,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            t('home.ctaCheckNow'),
+                            style: const TextStyle(
+                              color: AppTheme.primary,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(
+                            Icons.arrow_forward_rounded,
+                            color: AppTheme.primary,
+                            size: 18,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -234,97 +450,279 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  // -- Section title --
-
-  Widget _buildSectionTitle(BuildContext context, String text) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontSize: 18,
-        fontWeight: FontWeight.bold,
-        color: AppTheme.textPrimary,
-      ),
-    );
-  }
-
-  // -- Quick Check grid --
-
-  Widget _buildQuickCheckGrid(BuildContext context) {
+  // -- Safety Score card (post-redesign dashboard widget) --
+  //
+  // Replaced the 2x2 Quick Check grid. The home dashboard is now an
+  // information surface — "here's how risky the things you've checked
+  // have been" — instead of four duplicated entry points to the same
+  // scanners. The 4 scanners are still one tap away via the hero CTA
+  // above and the bottom-nav Check tab.
+  //
+  // The card reads from the same `HistoryService` snapshot as the
+  // Recent Scans list further down. We don't subscribe to a live
+  // stream because the score math is cheap (one pass over up to
+  // 50 entries) and the rebuild happens whenever HistoryService
+  // recomputes via the existing FutureBuilder chain.
+  Widget _buildSafetyScoreCard(BuildContext context) {
     final t = AppLocaleScope.of(context).tr;
-    final service = SubscriptionScope.of(context);
-    final state = service.state;
-    final limits = state.limits;
-    final unlimited = state.isPremium;
-    final tr = AppLocaleScope.of(context).tr;
-    String countLabel(int? remaining) {
-      if (unlimited || remaining == null) {
-        return tr('home.scansUnlimited');
-      }
-      return tr('home.scansLeftShort').replaceAll(
-        '{count}',
-        remaining.toString(),
-      );
-    }
+    final fmt = AppLocaleScope.of(context).formatNumber;
+    return FutureBuilder<List<HistoryEntry>>(
+      future: HistoryService().getHistory(limit: 50),
+      builder: (context, snapshot) {
+        final entries = snapshot.data ?? const <HistoryEntry>[];
+        // Loading: show a compact placeholder so the rest of the
+        // dashboard doesn't shift on first frame.
+        if (snapshot.connectionState != ConnectionState.done) {
+          return _ScoreCardShell(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 22,
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    t('home.safetyScoreCard.subtitle'),
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
 
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 14,
-      crossAxisSpacing: 14,
-      childAspectRatio: 1.1,
-      children: [
-        _QuickCheckCard(
-          icon: Icons.mark_email_read_rounded,
-          title: t('home.tile.message.title'),
-          subtitle: t('home.tile.message.subtitle'),
-          countLabel: countLabel(limits.messageScansRemaining),
-          showCount: !unlimited,
-          color: AppTheme.primary,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const MessageCheckerScreen()),
-          ),
-        ),
-        _QuickCheckCard(
-          icon: Icons.link_rounded,
-          title: t('home.tile.link.title'),
-          subtitle: t('home.tile.link.subtitle'),
-          countLabel: countLabel(limits.urlScansRemaining),
-          // URL checks are already unlimited on free; don't show a chip
-          // for them to avoid implying a quota that doesn't exist.
-          showCount: limits.urlScansRemaining != null,
-          color: AppTheme.secondary,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const UrlCheckerScreen()),
-          ),
-        ),
-        _QuickCheckCard(
-          icon: Icons.document_scanner_rounded,
-          title: t('home.tile.screenshot.title'),
-          subtitle: t('home.tile.screenshot.subtitle'),
-          countLabel: countLabel(limits.screenshotScansRemaining),
-          showCount: !unlimited,
-          color: AppTheme.accent,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => const ScreenshotScannerScreen(),
+        final score = SafetyScore.compute(entries);
+
+        if (score.status == SafetyStatus.noScans) {
+          return _ScoreCardShell(
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CheckScreen()),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary
+                          .withValues(alpha: AppTheme.tintSubtle),
+                      borderRadius:
+                          BorderRadius.circular(AppTheme.radiusSm),
+                    ),
+                    child: const Icon(
+                      Icons.shield_outlined,
+                      color: AppTheme.primary,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          t('home.safetyScoreCard.emptyTitle'),
+                          style: const TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          t('home.safetyScoreCard.emptyBody'),
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(
+                    Icons.arrow_forward_rounded,
+                    color: AppTheme.primary,
+                    size: 20,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // Colour tokens keyed off the band. Re-using the AppTheme
+        // risk palette so the card colour matches the per-row badges
+        // in History / Result pages — same verdict reads the same
+        // everywhere.
+        final bandColor = _statusColor(score.status);
+        final bandLabel = _statusLabel(score.status, t);
+
+        return _ScoreCardShell(
+          onTap: () {
+            // Tap on the card routes to History so the user can see
+            // which specific scans contributed to the score.
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const HistoryPage()),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header row: title + status pill.
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        t('home.safetyScoreCard.title'),
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: bandColor.withValues(
+                          alpha: AppTheme.tintSurface,
+                        ),
+                        borderRadius:
+                            BorderRadius.circular(AppTheme.radiusXs),
+                        border: Border.all(
+                          color: bandColor.withValues(alpha: 0.30),
+                        ),
+                      ),
+                      child: Text(
+                        bandLabel,
+                        style: TextStyle(
+                          color: bandColor,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 11,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                // Score ring + breakdown row. Ring is the visual
+                // anchor; the 4 stats to its right give the user the
+                // "why" without a chart.
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _ScoreRing(
+                      score: score.overallScore,
+                      color: bandColor,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            // Use the shared formatter so the
+                            // denominator localizes with the rest of
+                            // the number — `৮২ / ১০০` in Bangla,
+                            // `82 / 100` in English. Hardcoding
+                            // ` / 100` here used to leave the
+                            // denominator as ASCII in BN locale,
+                            // which read as "shows 100" against a
+                            // localised score (e.g. `৬৩ / 100`).
+                            AppLocaleScope.of(context).formatScore(score.overallScore),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 22,
+                              letterSpacing: -0.4,
+                              height: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${t('home.safetyScoreCard.last30Days')} · '
+                            '${fmt(score.totalInWindow)}',
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 12,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                // 4 stat pills in a 4-column grid. We collapse
+                // Critical+High into separate pills so a single
+                // critical scan stands out from a single high scan
+                // — both feel "dangerous" to the user but the
+                // pill colours match their actual severity.
+                Row(
+                  children: [
+                    Expanded(
+                      child: _StatPill(
+                        label: t('home.safetyScoreCard.stat.critical'),
+                        count: score.criticalCount,
+                        color: AppTheme.riskCritical,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _StatPill(
+                        label: t('home.safetyScoreCard.stat.high'),
+                        count: score.highCount,
+                        color: AppTheme.riskHigh,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _StatPill(
+                        label: t('home.safetyScoreCard.stat.medium'),
+                        count: score.mediumCount,
+                        color: AppTheme.riskMedium,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _StatPill(
+                        label: t('home.safetyScoreCard.stat.safe'),
+                        count: score.lowCount + score.safeCount,
+                        color: AppTheme.riskLow,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
-        ),
-        _QuickCheckCard(
-          icon: Icons.phone_rounded,
-          title: t('home.tile.number.title'),
-          subtitle: t('home.tile.number.subtitle'),
-          countLabel: countLabel(limits.phoneScansRemaining),
-          showCount: limits.phoneScansRemaining != null,
-          color: AppTheme.danger,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => const PhoneCheckerScreen(),
-            ),
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -337,77 +735,73 @@ class HomePage extends StatelessWidget {
       animation: service,
       builder: (context, _) {
         if (!service.state.isFree) return const SizedBox.shrink();
-        return Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(18),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const PremiumScreen()),
-            ),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [AppTheme.accent, Color(0xFFFFD789)],
+        return _Pressable(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const PremiumScreen()),
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              // Brand header gradient token — same as the AppBar +
+              // Go Premium upsell + Profile card CTAs.
+              gradient: AppTheme.headerGradient,
+              borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primary.withValues(alpha: 0.30),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
                 ),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.25),
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    child: const Icon(
-                      Icons.workspace_premium_rounded,
-                      color: Colors.white,
-                      size: 22,
-                    ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.20),
+                    borderRadius: BorderRadius.circular(13),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          t('home.goPremiumBanner.title'),
-                          style: const TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
+                  child: const Icon(
+                    Icons.workspace_premium_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        t('home.goPremiumBanner.title'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          letterSpacing: -0.2,
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          t('home.goPremiumBanner.subtitle'),
-                          style: TextStyle(
-                            color: AppTheme.textPrimary.withValues(
-                              alpha: 0.75,
-                            ),
-                            fontSize: 12,
-                            height: 1.25,
-                          ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        t('home.goPremiumBanner.subtitle'),
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.85),
+                          fontSize: 12,
+                          height: 1.4,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  const Icon(
-                    Icons.arrow_forward_rounded,
-                    color: AppTheme.textPrimary,
-                    size: 18,
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(
+                  Icons.arrow_forward_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ],
             ),
           ),
         );
@@ -419,32 +813,49 @@ class HomePage extends StatelessWidget {
 
   Widget _buildLearnTile(BuildContext context) {
     final t = AppLocaleScope.of(context).tr;
-    return Material(
-      color: AppTheme.secondary.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const LearnScreen()),
-          );
-        },
+    return _Pressable(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const LearnScreen()),
+        );
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+          border: Border.all(color: AppTheme.borderSubtle),
+        ),
         child: Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(18),
           child: Row(
             children: [
-              const Icon(Icons.school_rounded,
-                  size: 38, color: AppTheme.secondary),
-              const SizedBox(width: 16),
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: AppTheme.secondary.withValues(
+                    alpha: AppTheme.tintSubtle,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(
+                  Icons.school_rounded,
+                  size: 28,
+                  color: AppTheme.secondary,
+                ),
+              ),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       t('home.section.learn'),
                       style: const TextStyle(
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w700,
                         fontSize: 16,
+                        color: AppTheme.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -453,14 +864,17 @@ class HomePage extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 12,
                         color: AppTheme.textSecondary,
+                        height: 1.4,
                       ),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 4),
               const Icon(
                 Icons.chevron_right_rounded,
                 color: AppTheme.textSecondary,
+                size: 22,
               ),
             ],
           ),
@@ -469,9 +883,63 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  // -- Recent Scans (last 3) --
+  // -- Recent Scans header (title + inline "View all") --
 
-  Widget _buildRecentScans(BuildContext context) {
+  Widget _buildRecentScansHeader(BuildContext context) {
+    final t = AppLocaleScope.of(context).tr;
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            t('home.recentScansTitle'),
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.textPrimary,
+              letterSpacing: -0.4,
+              height: 1.2,
+            ),
+          ),
+        ),
+        _Pressable(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => HistoryPage()),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 4,
+              vertical: 4,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  t('home.recentScansViewAll'),
+                  style: const TextStyle(
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                const Icon(
+                  Icons.arrow_forward_rounded,
+                  color: AppTheme.primary,
+                  size: 14,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // -- Recent Scans list (last 3 + footer link) --
+
+  Widget _buildRecentScansList(BuildContext context) {
     final t = AppLocaleScope.of(context).tr;
     return FutureBuilder<List<HistoryEntry>>(
       future: HistoryService().getHistory(limit: 3),
@@ -493,10 +961,10 @@ class HomePage extends StatelessWidget {
         final scans = snapshot.data ?? const <HistoryEntry>[];
         if (scans.isEmpty) {
           return Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(AppTheme.radiusXl),
               border: Border.all(color: AppTheme.borderSubtle),
             ),
             child: Text(
@@ -511,7 +979,7 @@ class HomePage extends StatelessWidget {
         return Container(
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppTheme.radiusXl),
             border: Border.all(color: AppTheme.borderSubtle),
           ),
           child: Column(
@@ -522,6 +990,8 @@ class HomePage extends StatelessWidget {
                     height: 1,
                     thickness: 1,
                     color: AppTheme.borderSubtle,
+                    indent: 16,
+                    endIndent: 16,
                   ),
                 _RecentScanTile(
                   entry: scans[i],
@@ -539,17 +1009,14 @@ class HomePage extends StatelessWidget {
                 thickness: 1,
                 color: AppTheme.borderSubtle,
               ),
-              InkWell(
+              _Pressable(
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => HistoryPage()),
                   );
                 },
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(16),
-                ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -557,7 +1024,7 @@ class HomePage extends StatelessWidget {
                         t('home.recentScansViewAll'),
                         style: const TextStyle(
                           color: AppTheme.primary,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
                           fontSize: 13,
                         ),
                       ),
@@ -581,123 +1048,226 @@ class HomePage extends StatelessWidget {
 
 // -------- Reusable bits --------
 
-/// Bell icon button shown in the dashboard header.
-class _BellButton extends StatelessWidget {
-  const _BellButton({required this.onPressed});
+/// Lightweight press-scale wrapper used by the home screen's actionable
+/// surfaces. Scales to 0.97 while a pointer is down, springs back on
+/// release. Purely cosmetic - no state is leaked to the parent.
+class _Pressable extends StatefulWidget {
+  const _Pressable({required this.child, required this.onTap});
 
-  final VoidCallback onPressed;
+  final Widget child;
+  final VoidCallback onTap;
+
+  @override
+  State<_Pressable> createState() => _PressableState();
+}
+
+class _PressableState extends State<_Pressable> {
+  bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 46,
-      height: 46,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.borderSubtle),
-      ),
-      child: IconButton(
-        onPressed: onPressed,
-        icon: const Icon(
-          Icons.notifications_none_rounded,
-          color: AppTheme.primary,
-        ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: widget.child,
       ),
     );
   }
 }
 
-/// Single tile in the 2x2 Quick Check grid. Free users see a small scan
-/// count chip; premium users see none (their counts are unlimited).
-class _QuickCheckCard extends StatelessWidget {
-  const _QuickCheckCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.color,
-    required this.onTap,
-    required this.countLabel,
-    required this.showCount,
-  });
+// -------- Safety score helpers --------
 
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Color color;
-  final VoidCallback onTap;
-  final String countLabel;
-  final bool showCount;
+/// Visual + colour mapping for the 5-band [SafetyStatus]. Kept as a
+/// pure helper so the home dashboard's call to [_statusColor] /
+/// [_statusLabel] doesn't drift from any future rebrand of the
+/// same tokens elsewhere.
+Color _statusColor(SafetyStatus status) {
+  switch (status) {
+    case SafetyStatus.noScans:
+      return AppTheme.primary;
+    case SafetyStatus.excellent:
+    case SafetyStatus.good:
+      return AppTheme.riskLow;
+    case SafetyStatus.fair:
+      return AppTheme.riskMedium;
+    case SafetyStatus.poor:
+      return AppTheme.riskHigh;
+    case SafetyStatus.critical:
+      return AppTheme.riskCritical;
+  }
+}
+
+String _statusLabel(SafetyStatus status, String Function(String) tr) {
+  switch (status) {
+    case SafetyStatus.noScans:
+      return tr('home.safetyScoreCard.emptyTitle');
+    case SafetyStatus.excellent:
+      return tr('home.safetyScoreCard.status.excellent');
+    case SafetyStatus.good:
+      return tr('home.safetyScoreCard.status.good');
+    case SafetyStatus.fair:
+      return tr('home.safetyScoreCard.status.fair');
+    case SafetyStatus.poor:
+      return tr('home.safetyScoreCard.status.poor');
+    case SafetyStatus.critical:
+      return tr('home.safetyScoreCard.status.critical');
+  }
+}
+
+/// Outer shell for the Safety Score card. Same `radiusXl` rounded
+/// surface + subtle border used by the "Learn" tile so the two
+/// stacked cards read as a pair. The press scale is reused from
+/// [_Pressable] so taps on the card feel identical to taps on the
+/// hero CTA / run-check tile / Go Premium banner.
+class _ScoreCardShell extends StatelessWidget {
+  const _ScoreCardShell({required this.child, this.onTap});
+
+  final Widget child;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppTheme.borderSubtle),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child: Icon(icon, color: color, size: 21),
-                ),
-                if (showCount) ...[
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      countLabel,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: color,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
+    final card = Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+        border: Border.all(color: AppTheme.borderSubtle),
+      ),
+      child: child,
+    );
+    if (onTap == null) return card;
+    return _Pressable(onTap: onTap!, child: card);
+  }
+}
+
+/// Circular score indicator. Renders a 0-100 score with a coloured
+/// progress ring, leaving the actual breakdown to the surrounding
+/// card body. Sized via [size] so the same widget could be reused
+/// at smaller scales (e.g. profile card later) without restyling.
+class _ScoreRing extends StatelessWidget {
+  const _ScoreRing({required this.score, required this.color});
+
+  final int score;
+  final Color color;
+
+  static const double _size = 76;
+
+  @override
+  Widget build(BuildContext context) {
+    // Pct clamps to 0..1. We don't show intermediate progress as a
+    // sweep — the static ring + the number reads cleaner at this
+    // size than a partially-filled arc that could read as a bug.
+    final pct = (score / 100).clamp(0.0, 1.0);
+    return SizedBox(
+      width: _size,
+      height: _size,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Background ring — drawn first so the foreground overlay
+          // sits on top of it.
+          SizedBox(
+            width: _size,
+            height: _size,
+            child: CircularProgressIndicator(
+              value: 1,
+              strokeWidth: 7,
+              color: color.withValues(alpha: AppTheme.tintSubtle),
+              backgroundColor: color.withValues(alpha: AppTheme.tintSurface),
             ),
-            const Spacer(),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textPrimary,
-              ),
+          ),
+          // Foreground sweep — solid colour, same thickness, the
+          // actual score.
+          SizedBox(
+            width: _size,
+            height: _size,
+            child: CircularProgressIndicator(
+              value: pct,
+              strokeWidth: 7,
+              color: color,
+              backgroundColor: Colors.transparent,
             ),
-            const SizedBox(height: 3),
-            Text(
-              subtitle,
-              style: const TextStyle(
-                fontSize: 12,
-                color: AppTheme.textSecondary,
-              ),
+          ),
+          // Center label. We render the score here (not the "/100")
+          // so the big number is the focal point; the "/100" lives
+          // in the right-hand column for context.
+          Text(
+            AppLocaleScope.of(context).formatNumber(score),
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontWeight: FontWeight.w800,
+              fontSize: 22,
+              letterSpacing: -0.6,
+              height: 1.0,
             ),
-          ],
-        ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Single stat pill inside the Safety Score card. Stacks the count
+/// on top of the label so the count dominates (it's the data) and
+/// the label sets context. Background is a tint of the band colour
+/// so a glance at the four pills tells the user the distribution.
+class _StatPill extends StatelessWidget {
+  const _StatPill({
+    required this.label,
+    required this.count,
+    required this.color,
+  });
+
+  final String label;
+  final int count;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: AppTheme.tintSurface),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        border: Border.all(color: color.withValues(alpha: AppTheme.tintBorder)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            AppLocaleScope.of(context).formatNumber(count),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+              letterSpacing: -0.2,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -706,7 +1276,7 @@ class _QuickCheckCard extends StatelessWidget {
 /// Single row in the Recent Scans card. Shows scan-type icon, risk pill,
 /// truncated input, and the numeric score.
 class _RecentScanTile extends StatelessWidget {
-  const _RecentScanTile({required this.entry, required this.onTap});      
+  const _RecentScanTile({required this.entry, required this.onTap});
 
   final HistoryEntry entry;
   final VoidCallback onTap;
@@ -732,18 +1302,18 @@ class _RecentScanTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final meta = _typeMeta(context, entry.type);
     final style = RiskStyle.of(entry.result.level);
-    return InkWell(
+    return _Pressable(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
             Container(
-              width: 40,
-              height: 40,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                color: style.color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
+                color: style.color.withValues(alpha: AppTheme.tintSurface),
+                shape: BoxShape.circle,
               ),
               child: Icon(
                 meta.icon,
@@ -751,20 +1321,23 @@ class _RecentScanTile extends StatelessWidget {
                 size: 20,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     entry.result.category,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
                       color: AppTheme.textPrimary,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 3),
                   Text(
                     entry.originalText,
                     maxLines: 1,
@@ -777,29 +1350,29 @@ class _RecentScanTile extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
               decoration: BoxDecoration(
                 color: style.color,
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                style.badge,
+                entry.result.level.localizedBadge,
                 style: TextStyle(
                   color: style.onColor,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w800,
                   fontSize: 10,
-                  letterSpacing: 0.6,
+                  letterSpacing: 0.8,
                 ),
               ),
             ),
             const SizedBox(width: 8),
             Text(
-              '${entry.result.score}',
+              AppLocaleScope.of(context).formatNumber(entry.result.score),
               style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
                 color: AppTheme.textPrimary,
               ),
             ),
@@ -807,7 +1380,7 @@ class _RecentScanTile extends StatelessWidget {
             const Icon(
               Icons.chevron_right_rounded,
               color: AppTheme.textSecondary,
-              size: 18,
+              size: 20,
             ),
           ],
         ),
@@ -817,53 +1390,9 @@ class _RecentScanTile extends StatelessWidget {
 }
 
 // -------- Subscription bits --------
-
-/// Slim status chip below the header. Says "✨ Premium active" for premium
-/// users, otherwise renders nothing (the free-tier user already gets the
-/// amber Go Premium banner further down the page).
-class _SubscriptionChip extends StatelessWidget {
-  const _SubscriptionChip({required this.service});
-
-  final SubscriptionService service;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = AppLocaleScope.of(context).tr;
-    return AnimatedBuilder(
-      animation: service,
-      builder: (context, _) {
-        if (!service.state.isPremium) return const SizedBox.shrink();
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: AppTheme.success.withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: AppTheme.success.withValues(alpha: 0.30),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.verified_rounded,
-                size: 14,
-                color: AppTheme.success,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                t('home.premiumActiveChip'),
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.success,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
+//
+// (Removed: the old `_SubscriptionChip` that lived below the tagline
+// is gone. The plan status is now surfaced by the [HeaderPlanBadge]
+// in row 1 of the header, and the free-tier remaining count is
+// shown in the inline row below the tagline. The Go Premium banner
+// further down the page is the upgrade CTA for free users.)

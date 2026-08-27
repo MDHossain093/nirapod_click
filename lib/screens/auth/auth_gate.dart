@@ -1,23 +1,23 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
 import '../../services/auth_service.dart';
 import '../main/main_screen.dart';
+import '../splash/splash_page.dart';
 import 'login_page.dart';
 
 /// Listens to Firebase auth state and routes between [LoginPage] and
 /// [MainScreen].
 ///
-/// During the first frame we don't yet know who (if anyone) is signed in:
-/// Firebase has to rehydrate its cached session from disk. We show a
-/// branded splash instead of a plain spinner so the user never sees a
-/// half-loaded UI or a flash of LoginPage before MainScreen.
+/// Two signals gate the transition out of the splash:
+///   1. Firebase auth state has emitted (`snapshot.hasData` or our cached
+///      [_user] from `initState`).
+///   2. The splash itself has held for its minimum display duration.
 ///
-/// We also poll [_auth].currentUser directly so the splash can't get
-/// stuck if the auth-state stream fails to emit (e.g. a misconfigured
-/// native plugin on Windows). Once either signal arrives we render the
-/// appropriate screen and stop polling.
+/// We require **both** because the splash needs to be visible long
+/// enough to register (otherwise it's a 100ms flash on warm starts),
+/// but we must not hand off to the destination screen until Firebase
+/// has actually told us who's signed in.
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
@@ -29,13 +29,24 @@ class _AuthGateState extends State<AuthGate> {
   final _auth = AuthService();
   User? _user;
 
+  /// Set to true once [SplashPage.onReady] fires (its 1.5s minimum
+  /// display timer has elapsed). Until then we stay on the splash even
+  /// if Firebase has already resolved the user.
+  bool _splashDone = false;
+
   @override
   void initState() {
     super.initState();
     // Snapshot whatever Firebase already knows about the signed-in user.
     // On a warm start this resolves synchronously to the cached user
-    // (or null) and we can skip the splash entirely.
+    // (or null) and we can skip the splash as soon as its min-duration
+    // timer fires.
     _user = _auth.currentUser;
+  }
+
+  void _onSplashReady() {
+    if (!mounted) return;
+    setState(() => _splashDone = true);
   }
 
   @override
@@ -46,10 +57,15 @@ class _AuthGateState extends State<AuthGate> {
         // Prefer the stream's latest value (it supersedes any cached
         // currentUser we read in initState once it emits).
         final user = snapshot.hasData ? snapshot.data : _user;
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            user == null) {
-          return const _SplashScreen();
+
+        final authResolved =
+            snapshot.connectionState != ConnectionState.waiting || user != null;
+
+        // Stay on the splash until BOTH signals are ready.
+        if (!_splashDone || !authResolved) {
+          return SplashPage(onReady: _onSplashReady);
         }
+
         if (user == null) return const LoginPage();
         return const MainScreen();
       },
@@ -57,43 +73,4 @@ class _AuthGateState extends State<AuthGate> {
   }
 }
 
-class _SplashScreen extends StatelessWidget {
-  const _SplashScreen();
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(gradient: AppTheme.brandHeaderGradient),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Real logo if the asset is bundled; otherwise fall back to
-              // the Flutter-drawn shield mark.
-              Image.asset(
-                'assets/logo_full.png',
-                height: 140,
-                fit: BoxFit.contain,
-                errorBuilder: (_, _, _) => const Icon(
-                  Icons.shield_outlined,
-                  size: 80,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 28),
-              const SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.4,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

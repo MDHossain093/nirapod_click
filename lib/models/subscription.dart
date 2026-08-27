@@ -48,11 +48,14 @@ class PlanLimits {
 
   /// Free-tier defaults. URL + phone stay unlimited on free because
   /// those rely on local engines with no per-call cost; the message
-  /// and screenshot paths are the ones that burn Gemini quota.
+  /// and screenshot paths are the ones that burn Gemini quota, so
+  /// the per-kind free budget for each is 5 (matching the monthly
+  /// free-quota ceiling so the Profile card and the
+  /// `FreeQuotaService` line up).
   factory PlanLimits.freeDefault() => const PlanLimits(
-        messageScansRemaining: 4,
+        messageScansRemaining: 5,
         urlScansRemaining: null,
-        screenshotScansRemaining: 3,
+        screenshotScansRemaining: 5,
         phoneScansRemaining: null,
       );
 
@@ -63,6 +66,22 @@ class PlanLimits {
         screenshotScansRemaining: null,
         phoneScansRemaining: null,
       );
+
+  /// Build a copy with one field adjusted. Used by the subscription
+  /// service to decrement / restore the per-kind counters as scans
+  /// are recorded or deleted, without rebuilding every other field.
+  PlanLimits copyWithCounters({
+    int? messageScansRemaining,
+    int? screenshotScansRemaining,
+  }) {
+    return PlanLimits(
+      messageScansRemaining: messageScansRemaining ?? this.messageScansRemaining,
+      urlScansRemaining: urlScansRemaining,
+      screenshotScansRemaining:
+          screenshotScansRemaining ?? this.screenshotScansRemaining,
+      phoneScansRemaining: phoneScansRemaining,
+    );
+  }
 
   /// Pretty label for the profile card's quota line.
   ///

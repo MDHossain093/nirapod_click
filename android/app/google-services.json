@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "70465752929",
+    "firebase_url": "https://nirapodclick-default-rtdb.firebaseio.com",
     "project_id": "nirapodclick",
     "storage_bucket": "nirapodclick.firebasestorage.app"
   },

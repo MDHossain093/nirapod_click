@@ -27,20 +27,21 @@ service cloud.firestore {
     // sanity check on the client.
     //
     // Allowed fields (matches `CheckerRepository.serializeCheck`):
-    //   originalText  string  <= 5000
-    //   score         int     0..100
-    //   level         "safe" | "low" | "medium" | "high" | "critical"
-    //   category      string  <= 64
-    //   confidence    double  0..1
-    //   reasons       [string]  <= 25, each <= 200
-    //   type          "message" | "url" | "screenshot" | "phone"  (optional,
-    //                 defaults to "message" if absent)
-    //   createdAt     server timestamp
+    //   originalText      string  <= 5000
+    //   score             int     0..100
+    //   level             "safe" | "low" | "medium" | "high" | "critical"
+    //   category          string  <= 64
+    //   confidence        double  0..1
+    //   reasons           [string]  <= 25, each <= 200
+    //   type              "message" | "url" | "screenshot" | "phone"  (optional,
+    //                     defaults to "message" if absent)
+    //   aiWasUnavailable  bool    (optional — true when local fallback was used)
+    //   createdAt         server timestamp
     function isValidCheck() {
       let data = request.resource.data;
       return data.keys().hasOnly([
           'originalText', 'score', 'level', 'category', 'confidence',
-          'reasons', 'type', 'createdAt'])
+          'reasons', 'type', 'aiWasUnavailable', 'createdAt'])
         && data.originalText is string
         && data.originalText.size() <= 5000
         && data.score is int
@@ -122,6 +123,104 @@ service cloud.firestore {
                     && request.resource.data.createdAt == request.time;
 
       allow update, delete: if false;
+    }
+
+    // ---- Scam pattern database (rule engine data layer) --------------
+    //
+    // Schema:
+    //   scam_patterns/{patternId}
+    //     category:     string   (e.g. "Payment Scam")
+    //     keywords:     [string] (lowercase substrings)
+    //     score:        int      (0..100 — points added on match)
+    //     active:       bool     (admin can disable without deleting)
+    //     version:      int      (schema version — bump on breaking changes)
+    //     updatedAt:    server timestamp
+    //
+    //   scam_config/current
+    //     version:             int      (auto-incremented by seed)
+    //     updatedAt:           server timestamp
+    //     activePatternCount:  int      (number of bundled defaults seeded)
+    //
+    // Rules:
+    //   * Anyone (signed-in or anonymous) can READ scam_patterns and
+    //     scam_config — they're public reference data consumed by the
+    //     rule engine on every cold start. No PII lives here.
+    //   * Writes are DENIED from the client. Edits happen from the
+    //     Firebase Console (admin) or a future Admin Panel running
+    //     under privileged credentials. This keeps the global rule
+    //     set trustworthy: a signed-in user can't poison the rules
+    //     that every other user's app runs.
+    //
+    // The bundled `defaultScamRules` inside the APK handles first
+    // launch (empty collection) via a one-time auto-seed using
+    // `SetOptions(merge: true)`, so this read-true policy does not
+    // require the client to have write permission to bootstrap.
+    match /scam_patterns/{patternId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /scam_config/{configId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ---- URL rule database (URL checker rule engine data layer) ----
+    //
+    // Schema:
+    //   url_scam_rules/{ruleId}
+    //     type:       "tld" | "foreignTld" | "extension" | "keyword" |
+    //                 "shortener" | "brand"
+    //     category:   string   (output category on hit, e.g. "Phishing")
+    //     pattern:    string   (substring/suffix to match)
+    //     score:      int      (0..100 — points added on match)
+    //     active:     bool     (admin can disable without deleting)
+    //     version:    int      (schema version — bump on breaking changes)
+    //     updatedAt:  server timestamp
+    //
+    // Rules:
+    //   * Anyone (signed-in or anonymous) can READ url_scam_rules —
+    //     it's public reference data consumed by the URL checker on
+    //     every cold start. No PII lives here.
+    //   * Writes are DENIED from the client. Edits happen from the
+    //     Firebase Console (admin) only — mirroring the
+    //     `scam_patterns` posture so a signed-in user can't poison the
+    //     rule set that every other user's app runs.
+    //
+    // First-launch (empty collection) is handled by the bundled
+    // `defaultUrlScamRules` shipped in the APK. Unlike
+    // `scam_patterns`, there is NO auto-seed path here: the bundle
+    // returns silently and admin edits override the bundled
+    // defaults on next cold start.
+    match /url_scam_rules/{ruleId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ---- Admin-published safety alerts -----------------------------
+    //
+    // Schema:
+    //   admin_alerts/{alertId}
+    //     titleEn:     string   (<= 80)
+    //     titleBn:     string   (<= 80)
+    //     bodyEn:      string   (<= 500)
+    //     bodyBn:      string   (<= 500)
+    //     severity:    "info" | "warning" | "critical"
+    //     active:      bool
+    //     version:     int
+    //     updatedAt:   server timestamp
+    //
+    // Rules:
+    //   * Anyone (signed-in or anonymous) can READ admin_alerts —
+    //     they're public reference data shown to every user in the
+    //     Alerts page. No PII lives here.
+    //   * Writes are DENIED from the client. Edits happen from the
+    //     Firebase Console (admin SDK) only. The in-app Admin screen
+    //     uses the Firebase Admin SDK via a Cloud Function, so the
+    //     rule above stays `write: false` for end-user credentials.
+    match /admin_alerts/{alertId} {
+      allow read: if true;
+      allow write: if false;
     }
 
     // Default deny: anything not matched above is rejected.

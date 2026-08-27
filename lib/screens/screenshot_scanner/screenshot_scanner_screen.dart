@@ -9,9 +9,12 @@ import '../../core/locale/app_locale.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/risk_result.dart';
 import '../../services/checker_repository.dart';
+import '../../services/free_quota_service.dart';
 import '../../services/screenshot_analyzer.dart';
+import '../../services/subscription_service.dart';
 import '../../services/screenshot_hybrid_analyzer.dart';
 import '../../widgets/ai_unavailable_banner.dart';
+import '../../widgets/quota_exhausted_dialog.dart';
 import '../../widgets/risk_disclaimer.dart';
 
 /// Screenshot Scanner screen.
@@ -97,6 +100,47 @@ class _ScreenshotScannerScreenState
   }
 
   Future<void> _processImage(String path) async {
+    // Capture both scope services synchronously (before any awaits)
+    // so the `use_build_context_synchronously` lint doesn't fire
+    // when we call `QuotaExhaustedSheet.show(context)` after the
+    // per-kind gate await.
+    final quota = FreeQuotaScope.of(context);
+    final subscription = SubscriptionScope.of(context);
+
+    // Free-tier gate. We check before starting OCR because ML Kit
+    // recognition is the most expensive part of the flow — wasting
+    // 200–500 ms of user time on a result we're about to refuse
+    // would feel punitive.
+    final allowed = await quota.consume();
+    if (!allowed) {
+      if (!mounted) return;
+      await QuotaExhaustedSheet.show(context);
+      // Clear any state the user might have been looking at so the
+      // tap doesn't leave a half-loaded preview.
+      setState(() {
+        _image = null;
+        _extractedText = '';
+        _result = null;
+      });
+      return;
+    }
+
+    // Per-kind gate: refuse if the free-tier "screenshot scans left"
+    // counter has hit zero. We do this after the monthly gate so
+    // users see the more general message first.
+    final kindAllowed =
+        await subscription.recordScan(ScanType.screenshot);
+    if (!kindAllowed) {
+      if (!mounted) return;
+      await QuotaExhaustedSheet.show(context);
+      setState(() {
+        _image = null;
+        _extractedText = '';
+        _result = null;
+      });
+      return;
+    }
+
     setState(() {
       _isProcessing = true;
     });
@@ -179,6 +223,11 @@ class _ScreenshotScannerScreenState
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: Text(_tr('screenshotScanner.appBarTitle')),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: AppTheme.headerGradient,
+          ),
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -199,7 +248,7 @@ class _ScreenshotScannerScreenState
                 _tr('screenshotScanner.subheading'),
                 style: const TextStyle(
                   color: AppTheme.textSecondary,
-                  height: 1.5,
+                  height: 1.4,
                 ),
               ),
               const SizedBox(height: 24),
@@ -210,7 +259,7 @@ class _ScreenshotScannerScreenState
               ],
               if (_result != null) ...[
                 const SizedBox(height: 24),
-                _buildResultHeader(_result!),
+                _buildResultHeader(context, _result!),
                 if (_result!.aiWasUnavailable) ...[
                   const SizedBox(height: 12),
                   AiUnavailableBanner(
@@ -257,12 +306,17 @@ class _ScreenshotScannerScreenState
         width: double.infinity,
         height: 220,
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          // Brand header gradient token — same `primary → secondary`
+          // as the AppBar + Go Premium + Profile upsell CTAs.
+          gradient: AppTheme.headerGradient,
           borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
-          border: Border.all(
-            color: AppTheme.primary.withValues(alpha: 0.2),
-            width: 1.2,
-          ),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primary.withValues(alpha: 0.30),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
         clipBehavior: Clip.antiAlias,
         child: _image == null ? _buildPickerPlaceholder() : _buildPreview(),
@@ -278,30 +332,30 @@ class _ScreenshotScannerScreenState
           width: 64,
           height: 64,
           decoration: BoxDecoration(
-            color: AppTheme.primary.withValues(alpha: 0.10),
+            color: Colors.white.withValues(alpha: 0.20),
             shape: BoxShape.circle,
           ),
           child: const Icon(
             Icons.add_photo_alternate_outlined,
             size: 32,
-            color: AppTheme.primary,
+            color: Colors.white,
           ),
         ),
         const SizedBox(height: 14),
         Text(
           _tr('screenshotScanner.pickerTitle'),
           style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            color: AppTheme.textPrimary,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
             fontSize: 15,
           ),
         ),
         const SizedBox(height: 4),
         Text(
           _tr('screenshotScanner.pickerFormats'),
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 12,
-            color: AppTheme.textSecondary,
+            color: Colors.white.withValues(alpha: 0.80),
           ),
         ),
       ],
@@ -342,7 +396,7 @@ class _ScreenshotScannerScreenState
   // RESULT HEADER (score + verdict chip)
   // ─────────────────────────────────────────────────────────────
 
-  Widget _buildResultHeader(ScreenshotAnalysis result) {
+  Widget _buildResultHeader(BuildContext context, ScreenshotAnalysis result) {
     final level = _getRiskLevel(result.score);
     final color = _getColor(level);
     return Container(
@@ -350,14 +404,14 @@ class _ScreenshotScannerScreenState
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
         border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Column(
         children: [
           Container(
-            width: 72,
-            height: 72,
+            width: AppTheme.tileIconXl,
+            height: AppTheme.tileIconXl,
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.10),
               shape: BoxShape.circle,
@@ -371,6 +425,9 @@ class _ScreenshotScannerScreenState
           const SizedBox(height: 12),
           Text(
             _getTitle(level),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: color,
               fontSize: 22,
@@ -379,7 +436,9 @@ class _ScreenshotScannerScreenState
           ),
           const SizedBox(height: 4),
           Text(
-            '${result.score} / 100',
+            AppLocaleScope.of(context).formatScore(result.score),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontSize: 30,
               fontWeight: FontWeight.bold,
@@ -390,6 +449,8 @@ class _ScreenshotScannerScreenState
           Text(
             result.category,
             textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: AppTheme.textSecondary,
             ),
@@ -480,7 +541,7 @@ class _ScreenshotScannerScreenState
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: AppTheme.background,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppTheme.radiusXs),
             ),
             child: SelectableText(
               text,
@@ -589,6 +650,7 @@ class _ScreenshotScannerScreenState
                       style: const TextStyle(
                         fontSize: 14,
                         color: AppTheme.textPrimary,
+                        height: 1.4,
                       ),
                     ),
                   ),
@@ -617,7 +679,7 @@ class _ScreenshotScannerScreenState
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.primary.withValues(alpha: AppTheme.tintPanel),
+        color: AppTheme.primary.withValues(alpha: AppTheme.tintSurface),
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
       ),
       child: Row(
