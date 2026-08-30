@@ -266,7 +266,7 @@ class _EmptyState extends StatelessWidget {
               width: 96,
               height: 96,
               decoration: BoxDecoration(
-                color: AppTheme.riskCritical.withValues(alpha: 0.10),
+                color: AppTheme.riskCritical.withValues(alpha: AppTheme.tintSurface),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -452,8 +452,8 @@ class _AlertRow extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: style.color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
+                  color: style.color.withValues(alpha: AppTheme.tintPanelSoft),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusXs),
                 ),
                 child: Icon(style.icon, color: style.color),
               ),
@@ -471,7 +471,7 @@ class _AlertRow extends StatelessWidget {
                           ),
                           decoration: BoxDecoration(
                             color: style.color,
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(AppTheme.radiusXs),
                           ),
                           child: Text(
                             result.level.localizedBadge,
@@ -566,7 +566,7 @@ class _ScanTypeChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: AppTheme.primary.withValues(alpha: AppTheme.tintSubtle),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppTheme.radiusXs),
       ),
       // Wrap (not Row) so when the outer Wrap constrains the chip
       // tighter than its intrinsic width — e.g. a long "Phone Number"
@@ -654,7 +654,7 @@ class _AdminAlertCard extends StatelessWidget {
               vertical: 10,
             ),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.10),
+              color: color.withValues(alpha: AppTheme.tintSurface),
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(AppTheme.radiusMd - 1.2),
               ),

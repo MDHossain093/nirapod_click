@@ -5,9 +5,8 @@ import '../../core/auth/admin_gate.dart';
 import '../../core/locale/app_locale.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/auth_service.dart';
-import '../../services/checker_repository.dart';
 import '../../services/notifications_prefs_service.dart';
-import '../../widgets/scan_history_select_sheet.dart';
+import '../../widgets/pressable.dart';
 import '../admin/admin_alerts_screen.dart';
 import '../admin/admin_url_rules_screen.dart';
 import '../history/history_page.dart';
@@ -123,12 +122,6 @@ class ProfileScreen extends StatelessWidget {
                 subtitle: t('profile.menuThemeSubtitle'),
                 onTap: () => _showTheme(context),
               ),
-              _MenuItem(
-                icon: Icons.privacy_tip_outlined,
-                title: t('profile.menuPrivacyTitle'),
-                subtitle: t('profile.menuPrivacySubtitle'),
-                onTap: () => _showPrivacy(context),
-              ),
             ],
           ),
 
@@ -203,7 +196,7 @@ class ProfileScreen extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppTheme.sheetCornerRadius)),
       ),
       builder: (_) {
         return StatefulBuilder(
@@ -261,7 +254,7 @@ class ProfileScreen extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppTheme.sheetCornerRadius)),
       ),
       builder: (_) {
         return _SettingsSheet(
@@ -308,7 +301,7 @@ class ProfileScreen extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppTheme.sheetCornerRadius)),
       ),
       builder: (_) {
         return _SettingsSheet(
@@ -325,143 +318,6 @@ class ProfileScreen extends StatelessWidget {
         );
       },
     );
-  }
-
-  /// Privacy sheet. Body is the existing description paragraph + two
-  /// action buttons: a destructive "Delete all" (with a confirm dialog
-  /// behind it) and a neutral "Select scans to delete" that opens the
-  /// multi-select bottom sheet.
-  void _showPrivacy(BuildContext context) {
-    final t = AppLocaleScope.of(context).tr;
-    // Capture the parent navigator NOW, while the BuildContext is
-    // still valid, so the inner sheet buttons can chain to a second
-    // sheet after popping the privacy sheet. Using a stale inner
-    // context after `pop()` is the classic async-context-after-pop
-    // bug — it silently swallows the next `showModalBottomSheet`.
-    final parentNavigator = Navigator.of(context);
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) {
-        return _SettingsSheet(
-          title: t('profile.menuPrivacyTitle'),
-          icon: Icons.privacy_tip_outlined,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                t('profile.privacyBody'),
-                style: const TextStyle(
-                  height: 1.4,
-                  fontSize: 14,
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 18),
-              _PrivacyActionButton(
-                icon: Icons.delete_sweep_rounded,
-                label: t('profile.privacyDeleteAll'),
-                tone: _PrivacyActionTone.danger,
-                onTap: () => _confirmDeleteAll(context),
-              ),
-              const SizedBox(height: 10),
-              _PrivacyActionButton(
-                icon: Icons.checklist_rounded,
-                label: t('profile.privacyDeleteSelected'),
-                tone: _PrivacyActionTone.neutral,
-                onTap: () {
-                  // Pop the privacy sheet (this Navigator), then open
-                  // the multi-select sheet anchored to the parent
-                  // Navigator (Profile screen). Using the captured
-                  // parentNavigator avoids the "context has been
-                  // disposed" failure mode that hit this flow before.
-                  Navigator.of(context).pop();
-                  showScanHistorySelectSheet(parentNavigator.context);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  /// Confirm dialog for "delete all". On confirm: closes the privacy
-  /// sheet, calls [CheckerRepository.clearAll], and shows a SnackBar
-  /// with the deleted count. SnackBar is on the parent Scaffold so it
-  /// survives sheet dismissal.
-  Future<void> _confirmDeleteAll(BuildContext context) async {
-    final t = AppLocaleScope.of(context).tr;
-    final fmt = AppLocaleScope.of(context).formatNumber;
-    final navigator = Navigator.of(context);
-    final messenger = ScaffoldMessenger.of(context);
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(t('profile.privacyDeleteAllConfirm')),
-          content: Text(t('profile.privacyDeleteAllBody')),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text(t('profile.commonCancel')),
-            ),
-            Container(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [AppTheme.riskHigh, AppTheme.riskCritical],
-                ),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.transparent,
-                  foregroundColor: Colors.white,
-                  shadowColor: Colors.transparent,
-                  disabledBackgroundColor: Colors.transparent,
-                  disabledForegroundColor: Colors.white70,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: Text(t('profile.commonDelete')),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-    if (confirmed != true) return;
-
-    // Pop the privacy sheet so the SnackBar has somewhere to anchor.
-    navigator.pop();
-
-    try {
-      final deleted = await CheckerRepository().clearAll();
-      messenger.showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text(
-            t('profile.historyDeletedToast').replaceAll('{n}', fmt(deleted)),
-          ),
-        ),
-      );
-    } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text(e.toString()),
-        ),
-      );
-    }
   }
 
   Future<void> _logout(BuildContext context) async {
@@ -489,7 +345,7 @@ class ProfileScreen extends StatelessWidget {
             Container(
               decoration: BoxDecoration(
                 gradient: AppTheme.headerGradient,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
               ),
               child: ElevatedButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
@@ -608,7 +464,7 @@ class _ProfileHeader extends StatelessWidget {
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.primary.withValues(alpha: 0.22),
+                            color: AppTheme.primary.withValues(alpha: AppTheme.tintBorder),
                             blurRadius: 10,
                             offset: const Offset(0, 4),
                           ),
@@ -780,7 +636,7 @@ class _MenuItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const accent = AppTheme.primary;
-    return _Pressable(
+    return Pressable(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -791,7 +647,7 @@ class _MenuItem extends StatelessWidget {
               height: 40,
               decoration: BoxDecoration(
                 color: accent.withValues(alpha: AppTheme.tintSurface),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppTheme.radiusXs),
               ),
               child: Icon(icon, color: accent, size: 20),
             ),
@@ -875,7 +731,7 @@ class _GradientLogoutButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.riskCritical.withValues(alpha: 0.25),
+            color: AppTheme.riskCritical.withValues(alpha: AppTheme.tintBorder),
             blurRadius: 14,
             offset: const Offset(0, 6),
           ),
@@ -910,41 +766,6 @@ class _GradientLogoutButton extends StatelessWidget {
             fontWeight: FontWeight.w700,
           ),
         ),
-      ),
-    );
-  }
-}
-
-// -------- Pressable wrapper --------
-
-/// Lightweight press-scale wrapper — identical 0.97 spring used on
-/// Home / Check / Learn, so taps feel the same everywhere.
-class _Pressable extends StatefulWidget {
-  const _Pressable({required this.child, required this.onTap});
-
-  final Widget child;
-  final VoidCallback onTap;
-
-  @override
-  State<_Pressable> createState() => _PressableState();
-}
-
-class _PressableState extends State<_Pressable> {
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) => setState(() => _pressed = false),
-      onTapCancel: () => setState(() => _pressed = false),
-      onTap: widget.onTap,
-      child: AnimatedScale(
-        scale: _pressed ? 0.97 : 1.0,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-        child: widget.child,
       ),
     );
   }
@@ -993,7 +814,7 @@ class _SettingsSheet extends StatelessWidget {
                   height: 40,
                   decoration: BoxDecoration(
                     color: AppTheme.primary.withValues(alpha: AppTheme.tintSurface),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusXs),
                   ),
                   child: Icon(icon, color: AppTheme.primary, size: 20),
                 ),
@@ -1072,7 +893,7 @@ class _LanguageRow extends StatelessWidget {
               height: 40,
               decoration: BoxDecoration(
                 color: accent.withValues(alpha: AppTheme.tintSurface),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppTheme.radiusXs),
               ),
               alignment: Alignment.center,
               child: Text(
@@ -1102,86 +923,6 @@ class _LanguageRow extends StatelessWidget {
                   : Icons.chevron_right_rounded,
               color: selected ? accent : AppTheme.textSecondary,
               size: selected ? 22 : 20,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// -------- Privacy sheet bits --------
-
-/// Visual variant for [_PrivacyActionButton]. Danger is the red family
-/// used by the destructive buttons elsewhere (Logout); neutral is the
-/// brand-tinted style used for non-destructive actions like
-/// "Select items".
-enum _PrivacyActionTone { danger, neutral }
-
-/// Stacked row inside the Privacy sheet — tinted icon disc on the left,
-/// label in the middle, chevron on the right. Same visual shape as
-/// `_MenuItem` but with no `subtitle` slot (the Privacy sheet puts the
-/// explanatory copy above the buttons, not inside them).
-class _PrivacyActionButton extends StatelessWidget {
-  const _PrivacyActionButton({
-    required this.icon,
-    required this.label,
-    required this.tone,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final _PrivacyActionTone tone;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (tone) {
-      _PrivacyActionTone.danger => AppTheme.riskCritical,
-      _PrivacyActionTone.neutral => AppTheme.primary,
-    };
-    return _Pressable(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
-        ),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-          border: Border.all(
-            color: color.withValues(alpha: 0.30),
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: AppTheme.tintSurface),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: color, size: 20),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
-                  color: color,
-                ),
-              ),
-            ),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: color.withValues(alpha: 0.65),
-              size: 20,
             ),
           ],
         ),

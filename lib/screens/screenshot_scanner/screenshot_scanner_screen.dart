@@ -17,22 +17,21 @@ import '../../widgets/ai_unavailable_banner.dart';
 import '../../widgets/quota_exhausted_dialog.dart';
 import '../../widgets/risk_disclaimer.dart';
 
-/// Screenshot Scanner screen.
+/// Screenshot Scanner screen — two-stage OCR → Analyze flow.
 ///
-/// Flow:
-///   1. User picks a screenshot from the gallery.
-///   2. ML Kit [TextRecognizer] runs on-device OCR (Latin script).
-///   3. The extracted text is fed to [ScreenshotAnalyzer], which runs
-///      the message rule engine over the whole text **and** the URL
-///      rule engine over every embedded URL.
-///   4. The combined [ScreenshotAnalysis] is rendered with the same
-///      header-card visual language as the URL Checker, plus a
-///      "Links detected" panel listing every embedded URL that was
-///      scanned.
+/// Stage 1 (OCR + preview): the user picks a screenshot, ML Kit's
+/// on-device Latin script recognizer extracts the text, and it
+/// renders immediately so the user can review what was read before
+/// the analyzer runs.
 ///
-/// First version was local-only — Gemini is now wired through
-/// [ScreenshotHybridAnalyzer] (confidence-gated: only fires when the
-/// local message+URL pipeline is below the 0.80 confidence threshold).
+/// Stage 2 (Analyze): the user taps the primary CTA, the hybrid
+/// analyzer (message + URL engines, Gemini only when local
+/// confidence < 0.80) runs over the extracted text, and the full
+/// result surface renders.
+///
+/// Quota gates (monthly + per-kind screenshot) run at stage 1 so
+/// the expensive OCR never fires when we'd refuse. Tapping Analyze
+/// does not consume additional quota.
 class ScreenshotScannerScreen extends StatefulWidget {
   const ScreenshotScannerScreen({super.key});
 
@@ -45,11 +44,9 @@ class _ScreenshotScannerScreenState
     extends State<ScreenshotScannerScreen> {
   final ImagePicker _picker = ImagePicker();
 
-  // Latin script covers both English and the Romanized chunks
-  // commonly seen in Bangladeshi chat screenshots. Bengali script is
-  // pending an ML Kit script-check (TextRecognitionScript.bengali
-  // exists in v0.13+, but accuracy needs a sandbox test before we
-  // flip the default).
+  // Latin covers English + the Romanized chunks commonly seen in
+  // Bangladeshi chat screenshots. Bengali (`TextRecognitionScript.bengali`
+  // in v0.13+) needs a sandbox accuracy pass before we flip the default.
   final TextRecognizer _textRecognizer =
       TextRecognizer(script: TextRecognitionScript.latin);
 
@@ -58,7 +55,7 @@ class _ScreenshotScannerScreenState
   File? _image;
   String _extractedText = '';
   ScreenshotAnalysis? _result;
-  bool _isProcessing = false;
+  _Stage _stage = _Stage.idle;
 
   @override
   void dispose() {
@@ -75,9 +72,8 @@ class _ScreenshotScannerScreenState
       );
     } on PlatformException catch (e) {
       if (!mounted) return;
-      // image_picker throws PlatformException with code
-      // 'photo_access_denied' (Android) / 'photos' (iOS) when the
-      // user has not granted gallery access.
+      // image_picker throws `photo_access_denied` (Android) / `photos`
+      // (iOS) when the user hasn't granted gallery access.
       _showMessage(_tr('screenshotScanner.permissionDenied'));
       debugPrint('[ScreenshotScanner] picker denied: ${e.message}');
       return;
@@ -90,120 +86,125 @@ class _ScreenshotScannerScreenState
 
     if (image == null) return;
 
-    setState(() {
-      _image = File(image!.path);
-      _extractedText = '';
-      _result = null;
-    });
-
-    await _processImage(image.path);
+    setState(() => _image = File(image!.path));
+    await _runOcr(image.path);
   }
 
-  Future<void> _processImage(String path) async {
-    // Capture both scope services synchronously (before any awaits)
-    // so the `use_build_context_synchronously` lint doesn't fire
-    // when we call `QuotaExhaustedSheet.show(context)` after the
-    // per-kind gate await.
+  Future<void> _runOcr(String path) async {
+    // Snapshot both scopes synchronously so the
+    // `use_build_context_synchronously` lint doesn't fire when we
+    // reach `QuotaExhaustedSheet.show(context)` after an `await`.
     final quota = FreeQuotaScope.of(context);
     final subscription = SubscriptionScope.of(context);
 
-    // Free-tier gate. We check before starting OCR because ML Kit
-    // recognition is the most expensive part of the flow — wasting
-    // 200–500 ms of user time on a result we're about to refuse
-    // would feel punitive.
     final allowed = await quota.consume();
     if (!allowed) {
       if (!mounted) return;
       await QuotaExhaustedSheet.show(context);
-      // Clear any state the user might have been looking at so the
-      // tap doesn't leave a half-loaded preview.
-      setState(() {
-        _image = null;
-        _extractedText = '';
-        _result = null;
-      });
+      _resetToIdle();
       return;
     }
 
-    // Per-kind gate: refuse if the free-tier "screenshot scans left"
-    // counter has hit zero. We do this after the monthly gate so
-    // users see the more general message first.
     final kindAllowed =
         await subscription.recordScan(ScanType.screenshot);
     if (!kindAllowed) {
       if (!mounted) return;
       await QuotaExhaustedSheet.show(context);
-      setState(() {
-        _image = null;
-        _extractedText = '';
-        _result = null;
-      });
+      _resetToIdle();
       return;
     }
 
     setState(() {
-      _isProcessing = true;
+      _extractedText = '';
+      _result = null;
+      _stage = _Stage.ocrProcessing;
     });
 
+    String text;
     try {
       final inputImage = InputImage.fromFilePath(path);
       final recognizedText = await _textRecognizer.processImage(inputImage);
-      final text = recognizedText.text.trim();
-
-      if (text.isEmpty) {
-        if (!mounted) return;
-        _showMessage(_tr('screenshotScanner.emptyText'));
-        setState(() {
-          _extractedText = '';
-          _result = null;
-        });
-        return;
-      }
-
-      // Hybrid analyzer: pure-Dart first, Gemini only when the local
-      // message+URL pipeline lands below the 0.80 confidence gate.
-      final result = await _analyzer.analyze(text);
-
-      if (!mounted) return;
-      setState(() {
-        _extractedText = text;
-        _result = result;
-      });
-
-      // Best-effort history save. Truncate the extracted text so the
-      // history row stays a hint, not a full transcript.
-      try {
-        final preview = text.length > 200
-            ? text.substring(0, 200)
-            : text;
-        await CheckerRepository().saveScan(
-          result: RiskResult(
-            level: result.messageResult.level,
-            score: result.score,
-            confidence: result.messageResult.confidence,
-            reasons: result.reasons,
-            recommendations: result.recommendations,
-            category: result.category,
-            usedAi: result.messageResult.usedAi,
-          ),
-          originalText: preview,
-          type: ScanType.screenshot,
-        );
-      } catch (_) {
-        // ignored
-      }
+      text = recognizedText.text.trim();
     } catch (e, st) {
       if (!mounted) return;
       debugPrint('[ScreenshotScanner] OCR failed: $e');
       debugPrintStack(stackTrace: st, maxFrames: 4);
       _showMessage(_tr('screenshotScanner.errorGeneric'));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-        });
-      }
+      _resetToIdle();
+      return;
     }
+
+    if (text.isEmpty) {
+      if (!mounted) return;
+      _showMessage(_tr('screenshotScanner.emptyText'));
+      _resetToIdle();
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _extractedText = text;
+      _stage = _Stage.ocrComplete;
+    });
+  }
+
+  Future<void> _runAnalysis() async {
+    if (_stage != _Stage.ocrComplete || _extractedText.isEmpty) return;
+
+    setState(() => _stage = _Stage.analyzing);
+
+    final ScreenshotAnalysis result;
+    try {
+      result = await _analyzer.analyze(_extractedText);
+    } catch (e, st) {
+      if (!mounted) return;
+      debugPrint('[ScreenshotScanner] analyze failed: $e');
+      debugPrintStack(stackTrace: st, maxFrames: 4);
+      _showMessage(_tr('screenshotScanner.errorGeneric'));
+      setState(() => _stage = _Stage.ocrComplete);
+      return;
+    }
+
+    // Best-effort history. Truncate the OCR text so the history row
+    // stays a hint, not a full transcript.
+    try {
+      final preview = _extractedText.length > _kHistoryPreviewChars
+          ? _extractedText.substring(0, _kHistoryPreviewChars)
+          : _extractedText;
+      await CheckerRepository().saveScan(
+        result: RiskResult(
+          level: result.messageResult.level,
+          score: result.score,
+          confidence: result.messageResult.confidence,
+          reasons: result.reasons,
+          recommendations: result.recommendations,
+          category: result.category,
+          usedAi: result.messageResult.usedAi,
+        ),
+        originalText: preview,
+        type: ScanType.screenshot,
+      );
+    } catch (e) {
+      debugPrint('[ScreenshotScanner] history save failed: $e');
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _result = result;
+      _stage = _Stage.complete;
+    });
+  }
+
+  // Quota already spent at OCR stage stays spent; this only clears
+  // local screen state so the user can pick a new image.
+  void _resetToIdle() {
+    if (!mounted) return;
+    setState(() {
+      _image = null;
+      _extractedText = '';
+      _result = null;
+      _stage = _Stage.idle;
+    });
   }
 
   void _showMessage(String message) {
@@ -219,10 +220,12 @@ class _ScreenshotScannerScreenState
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocaleScope.of(context).tr;
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: Text(_tr('screenshotScanner.appBarTitle')),
+        title: Text(t('screenshotScanner.appBarTitle')),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: AppTheme.headerGradient,
@@ -236,7 +239,7 @@ class _ScreenshotScannerScreenState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _tr('screenshotScanner.heading'),
+                t('screenshotScanner.heading'),
                 style: const TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
@@ -245,49 +248,72 @@ class _ScreenshotScannerScreenState
               ),
               const SizedBox(height: 8),
               Text(
-                _tr('screenshotScanner.subheading'),
+                t('screenshotScanner.subheading'),
                 style: const TextStyle(
                   color: AppTheme.textSecondary,
                   height: 1.4,
                 ),
               ),
               const SizedBox(height: 24),
-              _buildImagePicker(),
-              if (_isProcessing) ...[
-                const SizedBox(height: 24),
-                const _ProcessingIndicator(),
+              _buildImagePicker(t),
+              if (_stage == _Stage.ocrProcessing) ...[
+                const SizedBox(height: 16),
+                _ProcessingIndicator(
+                  caption: t('screenshotScanner.processing'),
+                ),
               ],
-              if (_result != null) ...[
+              if (_stage == _Stage.ocrComplete) ...[
+                const SizedBox(height: 16),
+                Text(
+                  t('screenshotScanner.extractedPreviewHint'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildExtractedTextPanel(_extractedText),
+                const SizedBox(height: 14),
+                _AnalyzeCta(onPressed: _runAnalysis, label: t('screenshotScanner.analyzeCta')),
+                const SizedBox(height: 8),
+                _ReScanLink(onPressed: _pickImage, label: t('screenshotScanner.reScanCta')),
+              ],
+              if (_stage == _Stage.analyzing) ...[
+                const SizedBox(height: 16),
+                _ProcessingIndicator(
+                  caption: t('screenshotScanner.analyzing'),
+                ),
+                const SizedBox(height: 12),
+                _buildExtractedTextPanel(_extractedText),
+              ],
+              if (_stage == _Stage.complete && _result != null) ...[
                 const SizedBox(height: 24),
                 _buildResultHeader(context, _result!),
                 if (_result!.aiWasUnavailable) ...[
                   const SizedBox(height: 12),
                   AiUnavailableBanner(
-                    text: _tr('result.aiUnavailable'),
+                    text: t('result.aiUnavailable'),
                   ),
                 ],
-              ],
-              if (_extractedText.isNotEmpty) ...[
+                if (_result!.reasons.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _buildReasonsPanel(_result!),
+                ],
+                if (_result!.recommendations.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _buildRecommendationsPanel(_result!),
+                ],
                 const SizedBox(height: 16),
-                _buildExtractedTextPanel(_extractedText),
-              ],
-              if (_result != null && _result!.reasons.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _buildReasonsPanel(_result!),
-              ],
-              if (_result != null &&
-                  _result!.recommendations.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _buildRecommendationsPanel(_result!),
-              ],
-              if (_result != null) ...[
-                const SizedBox(height: 16),
-                _buildScanAnother(),
-                const SizedBox(height: 8),
-                _buildSafetyNotice(),
+                _buildScanAnother(t),
                 const SizedBox(height: 12),
-                RiskDisclaimer(text: _tr('result.disclaimer')),
+                RiskDisclaimer(text: t('result.disclaimer')),
               ],
+              // Always-visible safety notice — mirrors the URL checker so
+              // both screens communicate their privacy/limitation guidance
+              // before the user even starts a scan.
+              const SizedBox(height: 16),
+              _buildSafetyNotice(t),
             ],
           ),
         ),
@@ -295,36 +321,75 @@ class _ScreenshotScannerScreenState
     );
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // IMAGE PICKER
-  // ─────────────────────────────────────────────────────────────
-
-  Widget _buildImagePicker() {
+  Widget _buildImagePicker(AppLocaleTr t) {
+    final isBusy = _stage == _Stage.ocrProcessing ||
+        _stage == _Stage.analyzing;
     return GestureDetector(
-      onTap: _isProcessing ? null : _pickImage,
+      onTap: isBusy ? null : _pickImage,
       child: Container(
         width: double.infinity,
         height: 220,
         decoration: BoxDecoration(
-          // Brand header gradient token — same `primary → secondary`
-          // as the AppBar + Go Premium + Profile upsell CTAs.
           gradient: AppTheme.headerGradient,
           borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
           boxShadow: [
             BoxShadow(
-              color: AppTheme.primary.withValues(alpha: 0.30),
+              color: AppTheme.primary.withValues(alpha: AppTheme.tintBorderStrong),
               blurRadius: 14,
               offset: const Offset(0, 6),
             ),
           ],
         ),
         clipBehavior: Clip.antiAlias,
-        child: _image == null ? _buildPickerPlaceholder() : _buildPreview(),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_image == null)
+              _buildPickerPlaceholder(t)
+            else
+              Image.file(_image!, fit: BoxFit.cover),
+            if (_image != null && !isBusy)
+              Positioned(
+                right: 10,
+                top: 10,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+                  ),
+                  child: IconButton(
+                    tooltip: t('screenshotScanner.scanAnother'),
+                    onPressed: _pickImage,
+                    icon: const Icon(
+                      Icons.refresh_rounded,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            // OCR-time spinner overlay sits on top of the image so
+            // the user sees progress even when the gallery image is
+            // mostly white/black.
+            if (_stage == _Stage.ocrProcessing)
+              Container(
+                color: Colors.black.withValues(alpha: 0.35),
+                alignment: Alignment.center,
+                child: const SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildPickerPlaceholder() {
+  Widget _buildPickerPlaceholder(AppLocaleTr t) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -343,7 +408,7 @@ class _ScreenshotScannerScreenState
         ),
         const SizedBox(height: 14),
         Text(
-          _tr('screenshotScanner.pickerTitle'),
+          t('screenshotScanner.pickerTitle'),
           style: const TextStyle(
             fontWeight: FontWeight.w700,
             color: Colors.white,
@@ -352,7 +417,7 @@ class _ScreenshotScannerScreenState
         ),
         const SizedBox(height: 4),
         Text(
-          _tr('screenshotScanner.pickerFormats'),
+          t('screenshotScanner.pickerFormats'),
           style: TextStyle(
             fontSize: 12,
             color: Colors.white.withValues(alpha: 0.80),
@@ -362,50 +427,16 @@ class _ScreenshotScannerScreenState
     );
   }
 
-  Widget _buildPreview() {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Image.file(
-          _image!,
-          fit: BoxFit.cover,
-        ),
-        Positioned(
-          right: 10,
-          top: 10,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.45),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: IconButton(
-              tooltip: _tr('screenshotScanner.scanAnother'),
-              onPressed: _isProcessing ? null : _pickImage,
-              icon: const Icon(
-                Icons.refresh_rounded,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // RESULT HEADER (score + verdict chip)
-  // ─────────────────────────────────────────────────────────────
-
   Widget _buildResultHeader(BuildContext context, ScreenshotAnalysis result) {
-    final level = _getRiskLevel(result.score);
-    final color = _getColor(level);
+    final level = _scoreToRiskLevel(result.score);
+    final color = _colorForLevel(level);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
+        border: Border.all(color: color.withValues(alpha: AppTheme.tintBorder)),
       ),
       child: Column(
         children: [
@@ -413,18 +444,18 @@ class _ScreenshotScannerScreenState
             width: AppTheme.tileIconXl,
             height: AppTheme.tileIconXl,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.10),
+              color: color.withValues(alpha: AppTheme.tintSurface),
               shape: BoxShape.circle,
             ),
             child: Icon(
-              _getIcon(level),
+              _iconForLevel(level),
               color: color,
               size: 38,
             ),
           ),
           const SizedBox(height: 12),
           Text(
-            _getTitle(level),
+            _titleForLevel(level),
             textAlign: TextAlign.center,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
@@ -459,61 +490,64 @@ class _ScreenshotScannerScreenState
           _buildAiBadge(result.messageResult.usedAi),
           if (result.urlResults.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.background,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.borderSubtle),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.link_rounded,
-                        size: 16,
-                        color: AppTheme.primary,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        _tr('screenshotScanner.linksDetected'),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ...result.urlResults.map(
-                    (u) => Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        u.url,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.textSecondary,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            _buildLinksDetectedPanel(result, AppLocaleScope.of(context).tr),
           ],
         ],
       ),
     );
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // EXTRACTED TEXT PANEL
-  // ─────────────────────────────────────────────────────────────
+  Widget _buildLinksDetectedPanel(
+    ScreenshotAnalysis result,
+    AppLocaleTr t,
+  ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.background,
+        borderRadius: BorderRadius.circular(AppTheme.radiusXs),
+        border: Border.all(color: AppTheme.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.link_rounded,
+                size: 16,
+                color: AppTheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                t('screenshotScanner.linksDetected'),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...result.urlResults.map(
+            (u) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                u.url,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textSecondary,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildExtractedTextPanel(String text) {
     return Container(
@@ -557,12 +591,8 @@ class _ScreenshotScannerScreenState
     );
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // WHY? PANEL
-  // ─────────────────────────────────────────────────────────────
-
   Widget _buildReasonsPanel(ScreenshotAnalysis result) {
-    final color = _getColor(_getRiskLevel(result.score));
+    final color = _colorForLevel(_scoreToRiskLevel(result.score));
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
@@ -604,10 +634,6 @@ class _ScreenshotScannerScreenState
       ),
     );
   }
-
-  // ─────────────────────────────────────────────────────────────
-  // RECOMMENDATIONS PANEL
-  // ─────────────────────────────────────────────────────────────
 
   Widget _buildRecommendationsPanel(ScreenshotAnalysis result) {
     return Container(
@@ -663,19 +689,15 @@ class _ScreenshotScannerScreenState
     );
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // FOOTER (rescan + safety notice)
-  // ─────────────────────────────────────────────────────────────
-
-  Widget _buildScanAnother() {
+  Widget _buildScanAnother(AppLocaleTr t) {
     return OutlinedButton.icon(
-      onPressed: _isProcessing ? null : _pickImage,
+      onPressed: _pickImage,
       icon: const Icon(Icons.refresh_rounded),
-      label: Text(_tr('screenshotScanner.scanAnother')),
+      label: Text(t('screenshotScanner.scanAnother')),
     );
   }
 
-  Widget _buildSafetyNotice() {
+  Widget _buildSafetyNotice(AppLocaleTr t) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -693,7 +715,7 @@ class _ScreenshotScannerScreenState
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              _tr('screenshotScanner.safetyNotice'),
+              t('screenshotScanner.safetyNotice'),
               style: const TextStyle(
                 fontSize: 12,
                 color: AppTheme.textSecondary,
@@ -706,27 +728,20 @@ class _ScreenshotScannerScreenState
     );
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // HELPERS
-  // ─────────────────────────────────────────────────────────────
-
-  /// Small pill that surfaces whether the verdict came from the local
-  /// rule engine or Gemini. Mirrors the URL checker's badge shape.
   Widget _buildAiBadge(bool usedAi) {
-    final isAi = usedAi;
-    final key = isAi
+    final key = usedAi
         ? 'screenshotScanner.aiAssisted'
         : 'screenshotScanner.localOnly';
-    final color = isAi ? AppTheme.primary : AppTheme.textSecondary;
-    final icon = isAi
+    final color = usedAi ? AppTheme.primary : AppTheme.textSecondary;
+    final icon = usedAi
         ? Icons.auto_awesome_rounded
         : Icons.verified_user_outlined;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
+        color: color.withValues(alpha: AppTheme.tintSurface),
+        borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+        border: Border.all(color: color.withValues(alpha: AppTheme.tintBorder)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -746,78 +761,69 @@ class _ScreenshotScannerScreenState
     );
   }
 
-  /// Convert a raw 0–100 score to a coarse risk tier.
-  ///
-  /// Tiers (slightly more conservative than the URL checker so a single
-  /// flagged URL can still push a screenshot into "medium"):
-  ///   - 80+  : critical
-  ///   - 60+  : high
-  ///   - 35+  : medium
-  ///   - 15+  : low
-  ///   - else : safe
-  String _getRiskLevel(int score) {
-    if (score >= 80) return 'critical';
-    if (score >= 60) return 'high';
-    if (score >= 35) return 'medium';
-    if (score >= 15) return 'low';
-    return 'safe';
+  // Score-to-tier thresholds are tighter than the URL checker so a
+  // single flagged URL can still push a screenshot into "medium".
+  RiskLevel _scoreToRiskLevel(int score) {
+    if (score >= 80) return RiskLevel.critical;
+    if (score >= 60) return RiskLevel.high;
+    if (score >= 35) return RiskLevel.medium;
+    if (score >= 15) return RiskLevel.low;
+    return RiskLevel.safe;
   }
 
-  Color _getColor(String level) {
+  Color _colorForLevel(RiskLevel level) {
     switch (level) {
-      case 'safe':
-        return AppTheme.success;
-      case 'low':
-        return AppTheme.secondary;
-      case 'medium':
+      case RiskLevel.safe:
+      case RiskLevel.low:
+        return level == RiskLevel.safe ? AppTheme.success : AppTheme.secondary;
+      case RiskLevel.medium:
         return AppTheme.warning;
-      case 'high':
+      case RiskLevel.high:
         return AppTheme.riskHigh;
-      case 'critical':
+      case RiskLevel.critical:
         return AppTheme.danger;
     }
-    return AppTheme.textSecondary;
   }
 
-  IconData _getIcon(String level) {
+  IconData _iconForLevel(RiskLevel level) {
     switch (level) {
-      case 'safe':
+      case RiskLevel.safe:
         return Icons.verified_rounded;
-      case 'low':
+      case RiskLevel.low:
         return Icons.shield_outlined;
-      case 'medium':
+      case RiskLevel.medium:
         return Icons.warning_amber_rounded;
-      case 'high':
-      case 'critical':
+      case RiskLevel.high:
+      case RiskLevel.critical:
         return Icons.gpp_bad_rounded;
     }
-    return Icons.help_outline_rounded;
   }
 
-  String _getTitle(String level) {
-    switch (level) {
-      case 'safe':
-        return _tr('screenshotScanner.titleSafe');
-      case 'low':
-        return _tr('screenshotScanner.titleLow');
-      case 'medium':
-        return _tr('screenshotScanner.titleMedium');
-      case 'high':
-        return _tr('screenshotScanner.titleHigh');
-      case 'critical':
-        return _tr('screenshotScanner.titleCritical');
-    }
-    return _tr('screenshotScanner.titleSafe');
+  String _titleForLevel(RiskLevel level) {
+    final key = switch (level) {
+      RiskLevel.safe => 'screenshotScanner.titleSafe',
+      RiskLevel.low => 'screenshotScanner.titleLow',
+      RiskLevel.medium => 'screenshotScanner.titleMedium',
+      RiskLevel.high => 'screenshotScanner.titleHigh',
+      RiskLevel.critical => 'screenshotScanner.titleCritical',
+    };
+    return _tr(key);
   }
 }
 
-/// Lightweight "loading" pill used while ML Kit is recognizing text.
+const int _kHistoryPreviewChars = 200;
+
+typedef AppLocaleTr = String Function(String key);
+
+/// Spinner + caption pill used while ML Kit OCR or the analyzer
+/// runs.
 class _ProcessingIndicator extends StatelessWidget {
-  const _ProcessingIndicator();
+  const _ProcessingIndicator({required this.caption});
+
+  final String caption;
 
   @override
   Widget build(BuildContext context) {
-    final t = AppLocaleScope.of(context).tr;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -829,7 +835,8 @@ class _ProcessingIndicator extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            t('screenshotScanner.processing'),
+            caption,
+            textAlign: TextAlign.center,
             style: const TextStyle(
               color: AppTheme.textSecondary,
               fontSize: 13,
@@ -839,4 +846,90 @@ class _ProcessingIndicator extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Primary gradient CTA between the OCR preview and analysis. Same
+/// visual vocabulary as the message checker / Go Premium buttons.
+class _AnalyzeCta extends StatelessWidget {
+  const _AnalyzeCta({required this.onPressed, required this.label});
+
+  final VoidCallback onPressed;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      height: 52,
+      decoration: BoxDecoration(
+        gradient: AppTheme.headerGradient,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primary.withValues(alpha: AppTheme.tintBorder),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+          onTap: onPressed,
+          child: Center(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(
+                  Icons.arrow_forward_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReScanLink extends StatelessWidget {
+  const _ReScanLink({required this.onPressed, required this.label});
+
+  final VoidCallback onPressed;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: TextButton.icon(
+        onPressed: onPressed,
+        icon: const Icon(Icons.refresh_rounded, size: 16),
+        label: Text(label),
+      ),
+    );
+  }
+}
+
+enum _Stage {
+  idle,
+  ocrProcessing,
+  ocrComplete,
+  analyzing,
+  complete,
 }

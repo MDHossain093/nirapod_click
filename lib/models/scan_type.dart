@@ -11,7 +11,15 @@ enum ScanType {
   message,
   url,
   screenshot,
-  phone;
+  phone,
+
+  /// QR Code scan. A QR scan itself is **free** and never persisted
+  /// to history — it just routes to the URL / Phone / Message
+  /// checker that handles its decoded payload. This enum value is
+  /// reserved for future telemetry (e.g. counting how many QR scans
+  /// happened this month) and to keep the subscription service's
+  /// exhaustive switch honest.
+  qr;
 
   /// Stable wire name used in Firestore payloads + rules whitelist.
   String get wire => name;

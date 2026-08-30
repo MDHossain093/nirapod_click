@@ -4,6 +4,7 @@ import '../../core/locale/app_locale.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/safety_lessons.dart';
 import '../../models/safety_lesson.dart';
+import '../../widgets/pressable.dart';
 import 'lesson_detail_screen.dart';
 
 /// Local, offline Safety Learning Center.
@@ -81,39 +82,6 @@ class LearnScreen extends StatelessWidget {
 
 // -------- Reusable bits --------
 
-/// Lightweight press-scale wrapper — same 0.97 spring used on home and
-/// check, so taps feel identical across screens.
-class _Pressable extends StatefulWidget {
-  const _Pressable({required this.child, required this.onTap});
-
-  final Widget child;
-  final VoidCallback onTap;
-
-  @override
-  State<_Pressable> createState() => _PressableState();
-}
-
-class _PressableState extends State<_Pressable> {
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) => setState(() => _pressed = false),
-      onTapCancel: () => setState(() => _pressed = false),
-      onTap: widget.onTap,
-      child: AnimatedScale(
-        scale: _pressed ? 0.97 : 1.0,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-        child: widget.child,
-      ),
-    );
-  }
-}
-
 /// Single lesson card. Tinted surface in the brand's secondary teal so
 /// the list reads as a unified "Learn" zone (vs the colored-block Quick
 /// Check tiles on Home, which are the action zone).
@@ -134,7 +102,7 @@ class _LearnCard extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
-      child: _Pressable(
+      child: Pressable(
         onTap: onTap,
         child: Container(
           width: double.infinity,
@@ -143,11 +111,11 @@ class _LearnCard extends StatelessWidget {
             color: AppTheme.secondary.withValues(alpha: AppTheme.tintPanel),
             borderRadius: BorderRadius.circular(AppTheme.radiusXl),
             border: Border.all(
-              color: AppTheme.secondary.withValues(alpha: 0.18),
+              color: AppTheme.secondary.withValues(alpha: AppTheme.tintPanelSoft),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
+                color: Colors.black.withValues(alpha: AppTheme.shadowSoftAlpha),
                 blurRadius: 14,
                 offset: const Offset(0, 6),
               ),
@@ -165,10 +133,11 @@ class _LearnCard extends StatelessWidget {
                     height: AppTheme.tileIconMd,
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                      borderRadius: BorderRadius.circular(AppTheme.radiusXs),
                       boxShadow: [
                         BoxShadow(
-                          color: AppTheme.secondary.withValues(alpha: 0.15),
+                          color: AppTheme.secondary
+                              .withValues(alpha: AppTheme.shadowBrandAlpha),
                           blurRadius: 8,
                           offset: const Offset(0, 3),
                         ),

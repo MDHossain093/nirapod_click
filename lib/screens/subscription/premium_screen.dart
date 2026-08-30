@@ -53,12 +53,12 @@ class PremiumScreen extends StatelessWidget {
               builder: (context, _) {
                 final state = service.state;
                 return SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       _Hero(title: t('subscription.title')),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 8),
                       Text(
                         t('subscription.tagline'),
                         textAlign: TextAlign.center,
@@ -94,7 +94,7 @@ class PremiumScreen extends StatelessWidget {
                           },
                         ),
                       ],
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 16),
                       Text(
                         t('subscription.fineprint'),
                         textAlign: TextAlign.center,
@@ -124,36 +124,45 @@ class _Hero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // Real brand logo (same asset used by the splash) at the top
         // of the Premium screen, so the upsell reads as an intentional
         // brand moment instead of a tinted shield disc.
-        Image.asset(
-          'assets/logo_full.png',
-          width: 140,
-          height: 140,
-          fit: BoxFit.contain,
-          // Fallback to a shield mark if the asset isn't bundled on
-          // a desktop flavor. Keeps the screen usable in every build.
-          errorBuilder: (_, error, stack) {
-            // ignore: avoid_print
-            print('[PremiumScreen] logo asset missing: $error');
-            return Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.10),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.shield_rounded,
-                size: 56,
-                color: AppTheme.primary,
-              ),
-            );
-          },
+        //
+        // Sized as a square (160×160) with `BoxFit.contain` so the
+        // wordmark + Bangla tagline keep their natural proportions
+        // regardless of the asset's actual aspect ratio — the previous
+        // 200×180 box stretched wide logos horizontally and left a
+        // visible gap before the title.
+        SizedBox(
+          width: 300,
+          height: 200,
+          child: Image.asset(
+            'assets/logo_full.png',
+            fit: BoxFit.contain,
+            // Fallback to a shield mark if the asset isn't bundled on
+            // a desktop flavor. Keeps the screen usable in every build.
+            errorBuilder: (_, error, stack) {
+              // ignore: avoid_print
+              print('[PremiumScreen] logo asset missing: $error');
+              return Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: AppTheme.tintSurface),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.shield_rounded,
+                  size: 56,
+                  color: AppTheme.primary,
+                ),
+              );
+            },
+          ),
         ),
-        const SizedBox(height: 16),
+        
         Text(
           title,
           textAlign: TextAlign.center,
@@ -276,7 +285,7 @@ class _SubscribeButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primary.withValues(alpha: 0.30),
+            color: AppTheme.primary.withValues(alpha: AppTheme.tintBorderStrong),
             blurRadius: 14,
             offset: const Offset(0, 6),
           ),
@@ -328,7 +337,7 @@ class _ActiveBadge extends StatelessWidget {
       height: 52,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: AppTheme.secondary.withValues(alpha: 0.12),
+        color: AppTheme.secondary.withValues(alpha: AppTheme.tintPanelSoft),
         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
       ),
       child: Row(
@@ -380,7 +389,7 @@ class _ErrorBanner extends StatelessWidget {
         // banner" surface treatments on one scale.
         color: AppTheme.danger.withValues(alpha: AppTheme.tintSurface),
         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-        border: Border.all(color: AppTheme.danger.withValues(alpha: 0.30)),
+        border: Border.all(color: AppTheme.danger.withValues(alpha: AppTheme.tintBorderStrong)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

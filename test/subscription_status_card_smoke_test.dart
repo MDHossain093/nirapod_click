@@ -58,7 +58,8 @@ void main() {
     print('[free BN] hero + benefits + Go Premium CTA only ✓');
   });
 
-  testWidgets('Active card renders the renewal tile + status pill',
+  testWidgets(
+      'Active card renders the navy hero, renewal tile, and manage CTA',
       (tester) async {
     final service = SubscriptionService.instance;
     service.emitForTest(SubscriptionState(
@@ -84,13 +85,20 @@ void main() {
 
     // Premium title in EN.
     expect(find.text('NirapodClick Premium'), findsOneWidget);
+    // New navy-hero tagline.
+    expect(find.text('All checks unlocked'), findsOneWidget);
     // "Active" status pill.
     expect(find.text('Active'), findsOneWidget);
     // Renewal tile (formatDate is "Mon Day" — Dec 31 → "Dec 31").
     expect(find.textContaining('Dec 31'), findsOneWidget);
+    // Plan price receipt row.
+    expect(find.text('৳2.78 / day'), findsOneWidget);
+    // "Your benefits" section header.
+    expect(find.text('Your benefits'), findsOneWidget);
     // Manage CTA.
     expect(find.text('Manage Subscription'), findsOneWidget);
     // ignore: avoid_print
-    print('[active EN] status pill + renewal tile + manage CTA rendered ✓');
+    print(
+        '[active EN] navy hero + tagline + renewal + benefits + manage CTA rendered ✓');
   });
 }

@@ -117,7 +117,7 @@ class RiskResultPage extends StatelessWidget {
                       style.color.withValues(alpha: 0.78),
                     ],
                   ),
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusXl),
                 ),
                 child: Column(
                   children: [
@@ -447,7 +447,7 @@ class RiskResultPage extends StatelessWidget {
                             backgroundColor: AppTheme.secondary,
                             behavior: SnackBarBehavior.floating,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                             ),
                           ),
                         );
@@ -476,8 +476,8 @@ class RiskResultPage extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE5EAF1)),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        border: Border.all(color: AppTheme.borderSubtle),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -49,7 +49,7 @@ class LessonDetailScreen extends StatelessWidget {
               color: AppTheme.secondary.withValues(alpha: AppTheme.tintPanel),
               borderRadius: BorderRadius.circular(AppTheme.radiusXl),
               border: Border.all(
-                color: AppTheme.secondary.withValues(alpha: 0.18),
+                color: AppTheme.secondary.withValues(alpha: AppTheme.tintPanelSoft),
               ),
             ),
             child: Column(
@@ -108,7 +108,7 @@ class LessonDetailScreen extends StatelessWidget {
               color: AppTheme.primary.withValues(alpha: AppTheme.tintPanel),
               borderRadius: BorderRadius.circular(AppTheme.radiusXl),
               border: Border.all(
-                color: AppTheme.primary.withValues(alpha: 0.18),
+                color: AppTheme.primary.withValues(alpha: AppTheme.tintPanelSoft),
               ),
               boxShadow: [
                 BoxShadow(
@@ -226,7 +226,7 @@ class LessonDetailScreen extends StatelessWidget {
                       width: 22,
                       height: 22,
                       decoration: BoxDecoration(
-                        color: AppTheme.secondary.withValues(alpha: 0.12),
+                        color: AppTheme.secondary.withValues(alpha: AppTheme.tintPanelSoft),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(

@@ -110,7 +110,7 @@ describe('firestore.rules', () => {
 
   test('all four scan types are accepted on create', async () => {
     const db = await aliceDb();
-    for (const type of ['message', 'url', 'screenshot', 'phone']) {
+    for (const type of ['message', 'url', 'screenshot', 'phone', 'qr']) {
       const ok = { ...validCheck, type };
       await assertSucceeds(
         db.collection('users/alice/checks').add(ok),

@@ -30,7 +30,14 @@ import '../../widgets/risk_disclaimer.dart';
 /// the loading flag, and delegates actual decision-making to the
 /// engine and Firestore I/O to the service.
 class PhoneCheckerScreen extends StatefulWidget {
-  const PhoneCheckerScreen({super.key});
+  const PhoneCheckerScreen({super.key, this.initialValue});
+
+  /// Optional phone-number string to pre-fill the input field with
+  /// on first build. Used by the QR checker screen after a
+  /// phone-shaped QR (incl. `TEL:` URIs and vCard / MECARD payloads)
+  /// is decoded. The user can edit or clear before tapping "Check
+  /// Number", so a pre-fill never auto-runs the analyzer.
+  final String? initialValue;
 
   @override
   State<PhoneCheckerScreen> createState() =>
@@ -38,12 +45,18 @@ class PhoneCheckerScreen extends StatefulWidget {
 }
 
 class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
-  final _controller = TextEditingController();
+  late final TextEditingController _controller;
   final _engine = PhoneRiskEngine();
   final _reportService = ReportService();
 
   PhoneRiskResult? _result;
   bool _isChecking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue ?? '');
+  }
 
   @override
   void dispose() {
@@ -324,7 +337,7 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
                   borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                   boxShadow: [
                     BoxShadow(
-                      color: AppTheme.primary.withValues(alpha: 0.30),
+                      color: AppTheme.primary.withValues(alpha: AppTheme.tintBorderStrong),
                       blurRadius: 14,
                       offset: const Offset(0, 6),
                     ),
@@ -377,8 +390,6 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
               const SizedBox(height: 24),
 
               _buildSafetyNotice(),
-              const SizedBox(height: 12),
-              RiskDisclaimer(text: _tr('result.disclaimer')),
             ],
           ),
         ),
@@ -396,7 +407,7 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
         border: Border.all(
-          color: color.withValues(alpha: 0.25),
+          color: color.withValues(alpha: AppTheme.tintBorder),
         ),
       ),
       child: Column(
@@ -540,6 +551,9 @@ class _PhoneCheckerScreenState extends State<PhoneCheckerScreen> {
               label: Text(_tr('phoneChecker.reportButton')),
             ),
           ),
+
+          const SizedBox(height: 16),
+          RiskDisclaimer(text: _tr('result.disclaimer')),
         ],
       ),
     );

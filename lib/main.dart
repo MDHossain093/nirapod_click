@@ -12,6 +12,7 @@ import 'services/alert_service.dart';
 import 'services/free_quota_service.dart';
 import 'services/notifications_prefs_service.dart';
 import 'services/scam_rule_service.dart';
+import 'services/share_intent_service.dart';
 import 'services/subscription_service.dart';
 import 'services/url_scam_rule_service.dart';
 
@@ -103,6 +104,14 @@ Future<void> main() async {
   // call setLocale again on the first frame via updateShouldNotify,
   // so this is just an early bootstrap, not a divergence.
   Localizer.instance.setLocale(initialLocale);
+
+  // Arm the Android share-intent handler. This subscribes to the
+  // warm-start event channel and, synchronously-enough, reads any
+  // cold-start share that launched the app via ACTION_SEND.
+  // Awaiting it before `runApp` means a cold-start share is already
+  // in the queue by the time MainScreen's first build runs — the
+  // router sees it immediately rather than on the next frame.
+  await ShareIntentService.instance.start();
 
   runApp(NirapodClickApp(initialLocale: initialLocale));
 }

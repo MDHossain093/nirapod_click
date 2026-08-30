@@ -113,14 +113,29 @@ class _LoginMobileHero extends StatelessWidget {
       decoration: const BoxDecoration(
         gradient: AppTheme.brandHeaderGradient,
         borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(24),
-          bottomRight: Radius.circular(24),
+          bottomLeft: Radius.circular(AppTheme.sheetCornerRadius),
+          bottomRight: Radius.circular(AppTheme.sheetCornerRadius),
         ),
       ),
       child: Column(
-        children: const [
-          Icon(Icons.shield_outlined, size: 36, color: Colors.white),
-          SizedBox(height: 10),
+        children: [
+          // Brand mark — same `logo_full.png` asset used by the splash,
+          // Premium, and `AuthBrandPanel` so the login hero reads as one
+          // continuous brand moment. Sized at 56px height to stay
+          // compact enough for the narrow mobile hero but still legible.
+          // `errorBuilder` falls back to a generic shield if the asset
+          // is missing on a desktop build flavor.
+          Image.asset(
+            'assets/logo_full.png',
+            height: 56,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => const Icon(
+              Icons.shield_outlined,
+              size: 36,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 10),
           Text(
             'NirapodClick',
             style: TextStyle(

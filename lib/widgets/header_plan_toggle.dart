@@ -62,7 +62,7 @@ class HeaderPlanBadge extends StatelessWidget {
               : Colors.transparent,
           borderRadius: BorderRadius.circular(999),
           border: isPremium
-              ? Border.all(color: AppTheme.success.withValues(alpha: 0.30))
+              ? Border.all(color: AppTheme.success.withValues(alpha: AppTheme.tintBorderStrong))
               : null,
         ),
         child: Row(

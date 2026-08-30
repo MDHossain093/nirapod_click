@@ -303,10 +303,42 @@ const Map<String, _Entry> _translations = {
   ),
   'history.clearConfirm': _Entry('Delete all', 'সব মুছুন'),
   'history.cancel': _Entry('Cancel', 'বাতিল'),
+  // -- History: delete-menu popup (under the trash icon) --
+  'history.deleteMenuTitle': _Entry('Delete scans', 'স্ক্যান মুছুন'),
+  'history.deleteSelectMode': _Entry(
+    'Select to delete',
+    'মুছতে নির্বাচন করুন',
+  ),
+  // -- History: inline multi-select mode (rendered inside the
+  //    history list itself, not as a separate sheet) --
+  'history.selectionAppBarTitle': _Entry(
+    'Select scans',
+    'স্ক্যান নির্বাচন',
+  ),
+  'history.selectionCount': _Entry(
+    '{n} selected',
+    '{n}টি নির্বাচিত',
+  ),
+  'history.selectionDeleteConfirm': _Entry(
+    'Delete {n} scans?',
+    '{n}টি স্ক্যান মুছে ফেলবেন?',
+  ),
+  'history.selectionDeletedToast': _Entry(
+    'Deleted {n} scans.',
+    '{n}টি স্ক্যান মুছে ফেলা হয়েছে।',
+  ),
+  // Reused by the History page when "Select to delete" is tapped on
+  // an empty list — keeps the copy identical to the previous
+  // multi-select sheet's empty state.
+  'history.historySelectEmpty': _Entry(
+    'No scans to delete.',
+    'মুছার জন্য কোনো স্ক্যান নেই।',
+  ),
   'history.typeMessage': _Entry('Message', 'বার্তা'),
   'history.typeUrl': _Entry('URL', 'লিংক'),
   'history.typeScreenshot': _Entry('Screenshot', 'স্ক্রিনশট'),
   'history.typePhone': _Entry('Phone', 'ফোন'),
+  'history.typeQr': _Entry('QR Code', 'QR কোড'),
   'history.clearedToast': _Entry(
     'History cleared',
     'ইতিহাস মুছে ফেলা হয়েছে',
@@ -560,6 +592,108 @@ const Map<String, _Entry> _translations = {
     'CRITICAL RISK',
     'অত্যন্ত ঝুঁকিপূর্ণ',
   ),
+  'screenshotScanner.extractedPreviewHint': _Entry(
+    'Text extracted — review before analyzing',
+    'টেক্সট বের হয়েছে — বিশ্লেষণের আগে দেখুন',
+  ),
+  'screenshotScanner.analyzeCta': _Entry(
+    'Analyze',
+    'বিশ্লেষণ করুন',
+  ),
+  'screenshotScanner.reScanCta': _Entry(
+    'Re-scan',
+    'পুনরায় স্ক্যান',
+  ),
+  'screenshotScanner.analyzing': _Entry(
+    'Analyzing extracted text…',
+    'নির্ণীত লেখা বিশ্লেষণ হচ্ছে…',
+  ),
+
+  // -- QR Code Scanner screen --
+  'qrChecker.appBarTitle': _Entry(
+    'QR Code',
+    'QR কোড',
+  ),
+  'qrChecker.heading': _Entry(
+    'Scan a QR Code',
+    'QR কোড স্ক্যান করুন',
+  ),
+  'qrChecker.subheading': _Entry(
+    'Point your camera at any QR code to instantly check the '
+    'link, number, or message behind it.',
+    'যেকোনো QR কোডে ক্যামেরা ধরলে এর পেছনের লিংক, নম্বর বা '
+    'বার্তা স্বয়ংক্রিয়ভাবে যাচাই হবে।',
+  ),
+  'qrChecker.allowCamera': _Entry(
+    'Allow camera access',
+    'ক্যামেরা অ্যাক্সেস দিন',
+  ),
+  'qrChecker.permissionDenied': _Entry(
+    'Camera access denied. Open settings to allow it, or enter '
+    'the QR text manually.',
+    'ক্যামেরা অ্যাক্সেস প্রত্যাখ্যাত। সেটিংস থেকে অনুমতি দিন '
+    'অথবা QR-এর লেখা ম্যানুয়ালি লিখুন।',
+  ),
+  'qrChecker.permissionPermanentlyDenied': _Entry(
+    'Camera access is blocked. Tap below to open settings.',
+    'ক্যামেরা অ্যাক্সেস ব্লক করা আছে। সেটিংস খুলতে নিচে ট্যাপ করুন।',
+  ),
+  'qrChecker.openSettings': _Entry(
+    'Open settings',
+    'সেটিংস খুলুন',
+  ),
+  'qrChecker.enterManually': _Entry(
+    'Enter QR text manually',
+    'QR-এর লেখা ম্যানুয়ালি লিখুন',
+  ),
+  'qrChecker.enterManuallyHint': _Entry(
+    'Paste the QR code text below',
+    'নিচে QR কোডের লেখা পেস্ট করুন',
+  ),
+  'qrChecker.enterManuallyCta': _Entry(
+    'Continue',
+    'চালিয়ে যান',
+  ),
+  'qrChecker.enterManuallyCancel': _Entry(
+    'Cancel',
+    'বাতিল',
+  ),
+  'qrChecker.scanningHint': _Entry(
+    'Align the QR code within the frame',
+    'QR কোড ফ্রেমের মধ্যে রাখুন',
+  ),
+  'qrChecker.detected': _Entry(
+    'QR detected — checking…',
+    'QR শনাক্ত — যাচাই হচ্ছে…',
+  ),
+  'qrChecker.unsupportedContent': _Entry(
+    'QR code scanned, but the content is empty. Routing to the '
+    'message checker so you can decide what to do.',
+    'QR কোড স্ক্যান হয়েছে, তবে বিষয়বস্তু খালি। বার্তা যাচাইকারীতে '
+    'পাঠানো হচ্ছে যাতে আপনি সিদ্ধান্ত নিতে পারেন।',
+  ),
+  'qrChecker.routingUrl': _Entry(
+    'Opening URL checker…',
+    'লিংক যাচাইকারী খোলা হচ্ছে…',
+  ),
+  'qrChecker.routingPhone': _Entry(
+    'Opening phone checker…',
+    'ফোন যাচাইকারী খোলা হচ্ছে…',
+  ),
+  'qrChecker.routingText': _Entry(
+    'Opening message checker…',
+    'বার্তা যাচাইকারী খোলা হচ্ছে…',
+  ),
+
+  // -- Check hub: 5th tile --
+  'check.qrTitle': _Entry(
+    'QR Code',
+    'QR কোড',
+  ),
+  'check.qrSubtitle': _Entry(
+    'Scan a QR with your camera',
+    'ক্যামেরা দিয়ে QR স্ক্যান করুন',
+  ),
 
   // -- Learn / Safety Center screen --
   'learn.appBarTitle': _Entry(
@@ -769,55 +903,6 @@ const Map<String, _Entry> _translations = {
     'Show new critical scans on the home bell',
     'নতুন গুরুতর স্ক্যান হোমের ঘণ্টায় দেখান',
   ),
-  'profile.privacyDeleteAll': _Entry(
-    'Delete all scan history',
-    'সব স্ক্যান ইতিহাস মুছুন',
-  ),
-  'profile.privacyDeleteAllConfirm': _Entry(
-    'Delete all scans?',
-    'সব স্ক্যান মুছে ফেলবেন?',
-  ),
-  'profile.privacyDeleteAllBody': _Entry(
-    'This permanently removes every saved scan. This cannot be undone.',
-    'এটি প্রতিটি সংরক্ষিত স্ক্যান স্থায়ীভাবে মুছে দেবে। এটি ফিরিয়ে আনা যাবে না।',
-  ),
-  'profile.privacyDeleteSelected': _Entry(
-    'Select scans to delete',
-    'মুছতে স্ক্যান নির্বাচন করুন',
-  ),
-  'profile.historySelectTitle': _Entry(
-    'Select scans to delete',
-    'মুছতে স্ক্যান নির্বাচন করুন',
-  ),
-  'profile.historySelectEmpty': _Entry(
-    'No scans to delete.',
-    'মুছার জন্য কোনো স্ক্যান নেই।',
-  ),
-  'profile.historySelectLoadError': _Entry(
-    'Could not load scans. Check your connection and try again.',
-    'স্ক্যান লোড করা যায়নি। আপনার সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।',
-  ),
-  'profile.historySelectRetry': _Entry('Retry', 'আবার চেষ্টা করুন'),
-  'profile.historySelectCount': _Entry(
-    '{n} selected',
-    '{n}টি নির্বাচিত',
-  ),
-  'profile.historySelectDelete': _Entry('Delete', 'মুছুন'),
-  'profile.historySelectDeleteConfirm': _Entry(
-    'Delete {n} scans?',
-    '{n}টি স্ক্যান মুছে ফেলবেন?',
-  ),
-  'profile.historyDeletedToast': _Entry(
-    'Deleted {n} scans.',
-    '{n}টি স্ক্যান মুছে ফেলা হয়েছে।',
-  ),
-  'profile.commonDelete': _Entry('Delete', 'মুছুন'),
-  'profile.commonCancel': _Entry('Cancel', 'বাতিল'),
-  'profile.menuPrivacyTitle': _Entry('Privacy', 'গোপনীয়তা'),
-  'profile.menuPrivacySubtitle': _Entry(
-    'Manage your scan data',
-    'আপনার স্ক্যান ডেটা পরিচালনা করুন',
-  ),
   'profile.menuLogoutTitle': _Entry('Log Out', 'লগ আউট'),
   'profile.menuLogoutSubtitle': _Entry(
     'Sign out of NirapodClick',
@@ -837,13 +922,6 @@ const Map<String, _Entry> _translations = {
     'Tap the bell to review them.',
     'গুরুতর স্ক্যান সতর্কতা হোমের ঘণ্টায় দেখা যায়। '
     'সতর্কতাগুলো দেখতে ঘণ্টায় ট্যাপ করুন।',
-  ),
-  'profile.privacyBody': _Entry(
-    'NirapodClick should only store the minimum '
-    'information required to provide its services. '
-    'You can delete your scan history at any time.',
-    'নিরাপদক্লিক শুধু তার সেবা দেওয়ার জন্য প্রয়োজনীয় সর্বনিম্ন তথ্য সংরক্ষণ করে। '
-    'আপনি যেকোনো সময় আপনার স্ক্যান ইতিহাস মুছে ফেলতে পারবেন।',
   ),
   'profile.logoutDialogTitle': _Entry('Log out?', 'লগ আউট করবেন?'),
   'profile.logoutDialogBody': _Entry(
@@ -969,6 +1047,28 @@ const Map<String, _Entry> _translations = {
     'Unsubscribe',
     'নাম প্রত্যাহার',
   ),
+  'subscription.fineprint.dialogTitle': _Entry(
+    'Cancel Premium?',
+    'প্রিমিয়াম বাতিল করবেন?',
+  ),
+  'subscription.fineprint.dialogBody': _Entry(
+    'You\'ll lose unlimited message scans, advanced AI analysis, and '
+    'detailed risk reports. You can resubscribe anytime.',
+    'সীমাহীন বার্তা যাচাই, উন্নত AI বিশ্লেষণ ও বিস্তারিত ঝুঁকি রিপোর্ট '
+    'হারাবেন। যেকোনো সময় আবার সাবস্ক্রাইব করতে পারবেন।',
+  ),
+  'subscription.fineprint.confirm': _Entry(
+    'Yes, cancel',
+    'হ্যাঁ, বাতিল করুন',
+  ),
+  'subscription.fineprint.keep': _Entry(
+    'Keep Premium',
+    'প্রিমিয়াম রাখুন',
+  ),
+  'subscription.fineprint.canceledToast': _Entry(
+    'Premium subscription canceled',
+    'প্রিমিয়াম সাবস্ক্রিপশন বাতিল হয়েছে',
+  ),
   'subscription.errorTitle': _Entry(
     'Subscription could not be verified',
     'সাবস্ক্রিপশন যাচাই করা যায়নি',
@@ -986,6 +1086,14 @@ const Map<String, _Entry> _translations = {
   'subscription.card.premiumStatus': _Entry(
     'Active',
     'সক্রিয়',
+  ),
+  'subscription.card.premiumTagline': _Entry(
+    'All checks unlocked',
+    'সব যাচাই চালু',
+  ),
+  'subscription.card.premiumBenefitsHeader': _Entry(
+    'Your benefits',
+    'আপনার সুবিশা',
   ),
   'subscription.card.premiumPrice': _Entry(
     '৳2.78 / day',

@@ -33,17 +33,32 @@ import '../../widgets/risk_disclaimer.dart';
 ///   - Tap on the verdict card opens `RiskResultPage` for the full report.
 ///   - Safety notice always shown below the verdict card.
 class MessageCheckerScreen extends StatefulWidget {
-  const MessageCheckerScreen({super.key});
+  const MessageCheckerScreen({super.key, this.initialValue});
+
+  /// Optional text to pre-fill the input field with on first build.
+  ///
+  /// Used by the QR checker screen to drop the decoded payload into
+  /// the text field after the user scans a non-URL / non-phone QR.
+  /// The user can edit or clear before tapping "Check", so a
+  /// pre-fill never auto-runs the analyzer — it just spares the user
+  /// a paste.
+  final String? initialValue;
 
   @override
   State<MessageCheckerScreen> createState() => _MessageCheckerScreenState();
 }
 
 class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
-  final _ctrl = TextEditingController();
+  late final TextEditingController _ctrl;
   final _analyzer = HybridAnalyzer();
   bool _busy = false;
   RiskResult? _result;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initialValue ?? '');
+  }
 
   @override
   void dispose() {
@@ -246,7 +261,7 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
           border: Border.all(
-            color: style.color.withValues(alpha: 0.25),
+            color: style.color.withValues(alpha: AppTheme.tintBorder),
           ),
         ),
         child: Column(
@@ -263,7 +278,7 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
                     width: AppTheme.tileIconXl,
                     height: AppTheme.tileIconXl,
                     decoration: BoxDecoration(
-                      color: style.color.withValues(alpha: 0.10),
+                      color: style.color.withValues(alpha: AppTheme.tintSurface),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
@@ -474,8 +489,8 @@ class _MessageCheckerScreenState extends State<MessageCheckerScreen> {
         vertical: 4,
       ),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(20),
+        color: color.withValues(alpha: AppTheme.tintSurface),
+        borderRadius: BorderRadius.circular(AppTheme.radiusXl),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -560,7 +575,7 @@ class _PrimaryCta extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primary.withValues(alpha: 0.30),
+            color: AppTheme.primary.withValues(alpha: AppTheme.tintBorderStrong),
             blurRadius: 14,
             offset: const Offset(0, 6),
           ),

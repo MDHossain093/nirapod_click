@@ -188,7 +188,11 @@ class SubscriptionService extends ChangeNotifier {
                     .copyWithCounters(screenshotScansRemaining: n)));
       case ScanType.url:
       case ScanType.phone:
-        // Local-engine scans — no quota on free tier.
+      case ScanType.qr:
+        // Local-engine scans — no quota on free tier. QR is also
+        // free because the scan itself is just a routing step; the
+        // *destination* check (URL / phone / message) is what
+        // decrements its own counter on its own screen.
         return true;
     }
   }
@@ -225,6 +229,7 @@ class SubscriptionService extends ChangeNotifier {
         break;
       case ScanType.url:
       case ScanType.phone:
+      case ScanType.qr:
         // No counter to refund.
         break;
     }
@@ -242,6 +247,7 @@ class SubscriptionService extends ChangeNotifier {
         return (_state.limits.screenshotScansRemaining ?? 0) == 0;
       case ScanType.url:
       case ScanType.phone:
+      case ScanType.qr:
         return false;
     }
   }

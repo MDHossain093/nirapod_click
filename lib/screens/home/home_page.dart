@@ -7,11 +7,11 @@ import '../../core/safety_score.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/checker_repository.dart';
 import '../../services/free_quota_service.dart';
-import '../../services/history_service.dart';
 import '../../services/subscription_service.dart';
 import '../../widgets/alert_badge_bell.dart';
 import '../../widgets/header_plan_toggle.dart';
 import '../../widgets/language_toggle.dart';
+import '../../widgets/pressable.dart';
 import '../check/check_screen.dart';
 import '../history/history_page.dart';
 import '../learn/learn_screen.dart';
@@ -136,8 +136,8 @@ class HomePage extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFFEAF1FB),
-            Color(0xFFE2F4F1),
+            AppTheme.headerTintStart,
+            AppTheme.headerTintEnd,
           ],
         ),
         borderRadius: BorderRadius.circular(AppTheme.radiusHero),
@@ -303,7 +303,7 @@ class HomePage extends StatelessWidget {
                 ],
               );
               if (isPremium) return content;
-              return _Pressable(
+              return Pressable(
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => const PremiumScreen(),
@@ -322,7 +322,7 @@ class HomePage extends StatelessWidget {
 
   Widget _buildHeroCta(BuildContext context) {
     final t = AppLocaleScope.of(context).tr;
-    return _Pressable(
+    return Pressable(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const CheckScreen()),
       ),
@@ -335,7 +335,7 @@ class HomePage extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppTheme.radiusHero),
           boxShadow: [
             BoxShadow(
-              color: AppTheme.primary.withValues(alpha: 0.30),
+              color: AppTheme.primary.withValues(alpha: AppTheme.tintBorderStrong),
               blurRadius: 26,
               offset: const Offset(0, 14),
             ),
@@ -383,10 +383,21 @@ class HomePage extends StatelessWidget {
                         color: Colors.white.withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: const Icon(
-                        Icons.shield_rounded,
-                        size: 26,
-                        color: Colors.white,
+                      // Launcher icon mark — `assets/icon.png` is the
+                      // icon-only brand mark (no wordmark), which fits
+                      // the 48px corner slot without dominating the
+                      // card. The full wordmark logo would be too busy
+                      // here; the home header already shows the app
+                      // name in the top bar. Falls back to a generic
+                      // shield if the asset isn't bundled.
+                      child: Image.asset(
+                        'assets/icon.png',
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => const Icon(
+                          Icons.shield_rounded,
+                          size: 26,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -458,21 +469,33 @@ class HomePage extends StatelessWidget {
   // scanners. The 4 scanners are still one tap away via the hero CTA
   // above and the bottom-nav Check tab.
   //
-  // The card reads from the same `HistoryService` snapshot as the
-  // Recent Scans list further down. We don't subscribe to a live
-  // stream because the score math is cheap (one pass over up to
-  // 50 entries) and the rebuild happens whenever HistoryService
-  // recomputes via the existing FutureBuilder chain.
+  // The card reads from the same Firestore snapshots stream the
+  // History page uses (`CheckerRepository.watchRecent`). It used to
+  // be a `FutureBuilder` wrapped around a one-shot `getHistory()`
+  // call — that worked on first load but never refreshed when the
+  // user deleted scans from the History page, because `FutureBuilder`
+  // only re-fires when its `future` argument changes identity. The
+  // bug surfaced as "deleted scans still show on home until I close
+  // and reopen the app". Switching to `StreamBuilder` ties the home
+  // dashboard to the same live subscription the History page is on,
+  // so any delete / save re-emits the snapshot and rebuilds both
+  // views in lockstep.
   Widget _buildSafetyScoreCard(BuildContext context) {
     final t = AppLocaleScope.of(context).tr;
     final fmt = AppLocaleScope.of(context).formatNumber;
-    return FutureBuilder<List<HistoryEntry>>(
-      future: HistoryService().getHistory(limit: 50),
+    return StreamBuilder<List<HistoryEntry>>(
+      stream: CheckerRepository().watchRecent(limit: 50),
       builder: (context, snapshot) {
-        final entries = snapshot.data ?? const <HistoryEntry>[];
-        // Loading: show a compact placeholder so the rest of the
-        // dashboard doesn't shift on first frame.
-        if (snapshot.connectionState != ConnectionState.done) {
+        // Loading state. Firestore snapshots streams report
+        // `ConnectionState.active` once the listener is subscribed,
+        // not `done`, so the old `!= done` check would have flashed
+        // a spinner for every re-emission after the first. We show
+        // the spinner only while genuinely waiting AND we don't yet
+        // have data to render. Subsequent re-emissions keep the
+        // previous data on screen while the new one settles — no
+        // flicker.
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
           return _ScoreCardShell(
             child: Padding(
               padding: const EdgeInsets.symmetric(
@@ -500,6 +523,14 @@ class HomePage extends StatelessWidget {
           );
         }
 
+        // If the stream errored AND we don't have anything cached
+        // yet (cold-start failure), fall through to the "no scans"
+        // branch by treating the error as an empty entry list. Same
+        // UX as the old FutureBuilder, which caught everything and
+        // returned `[]`.
+        final entries = (snapshot.hasError && !snapshot.hasData)
+            ? const <HistoryEntry>[]
+            : (snapshot.data ?? const <HistoryEntry>[]);
         final score = SafetyScore.compute(entries);
 
         if (score.status == SafetyStatus.noScans) {
@@ -610,7 +641,7 @@ class HomePage extends StatelessWidget {
                         borderRadius:
                             BorderRadius.circular(AppTheme.radiusXs),
                         border: Border.all(
-                          color: bandColor.withValues(alpha: 0.30),
+                          color: bandColor.withValues(alpha: AppTheme.tintBorderStrong),
                         ),
                       ),
                       child: Text(
@@ -735,7 +766,7 @@ class HomePage extends StatelessWidget {
       animation: service,
       builder: (context, _) {
         if (!service.state.isFree) return const SizedBox.shrink();
-        return _Pressable(
+        return Pressable(
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const PremiumScreen()),
           ),
@@ -748,7 +779,7 @@ class HomePage extends StatelessWidget {
               borderRadius: BorderRadius.circular(AppTheme.radiusXl),
               boxShadow: [
                 BoxShadow(
-                  color: AppTheme.primary.withValues(alpha: 0.30),
+                  color: AppTheme.primary.withValues(alpha: AppTheme.tintBorderStrong),
                   blurRadius: 18,
                   offset: const Offset(0, 8),
                 ),
@@ -761,7 +792,7 @@ class HomePage extends StatelessWidget {
                   height: 44,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.20),
-                    borderRadius: BorderRadius.circular(13),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusXs),
                   ),
                   child: const Icon(
                     Icons.workspace_premium_rounded,
@@ -813,7 +844,7 @@ class HomePage extends StatelessWidget {
 
   Widget _buildLearnTile(BuildContext context) {
     final t = AppLocaleScope.of(context).tr;
-    return _Pressable(
+    return Pressable(
       onTap: () {
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const LearnScreen()),
@@ -901,7 +932,7 @@ class HomePage extends StatelessWidget {
             ),
           ),
         ),
-        _Pressable(
+        Pressable(
           onTap: () {
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => HistoryPage()),
@@ -941,10 +972,26 @@ class HomePage extends StatelessWidget {
 
   Widget _buildRecentScansList(BuildContext context) {
     final t = AppLocaleScope.of(context).tr;
-    return FutureBuilder<List<HistoryEntry>>(
-      future: HistoryService().getHistory(limit: 3),
+    // Live Firestore snapshots stream, same pattern as the History
+    // page. We subscribe to the same `watchRecent(limit: 50)` the
+    // Safety Score card uses so deletes from the History page
+    // propagate here automatically — the previous
+    // `FutureBuilder(getHistory(limit: 3))` only fired once on
+    // mount, leaving a stale "last 3" on screen until the user
+    // closed and reopened the app. We then `.take(3)` to clip down
+    // to the dashboard's "last 3" tile; the underlying repository
+    // always reads the most-recent `limit` rows in `createdAt desc`
+    // order so taking the first 3 is the right slice.
+    return StreamBuilder<List<HistoryEntry>>(
+      stream: CheckerRepository().watchRecent(limit: 50),
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
+        // Same loading-gate pattern as the Safety Score card:
+        // spinner only while waiting AND we have no data yet. After
+        // the first emission, subsequent re-emissions keep the
+        // previous list visible while the new one is fetched — no
+        // flicker on every Firestore write.
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
           // Compact loading placeholder - the rest of the dashboard
           // shouldn't shift while we wait.
           return const Padding(
@@ -958,7 +1005,18 @@ class HomePage extends StatelessWidget {
             ),
           );
         }
-        final scans = snapshot.data ?? const <HistoryEntry>[];
+        // If the stream errored AND we don't have anything cached
+        // yet, fall through to the empty-state branch — same UX as
+        // the old FutureBuilder which caught everything and returned
+        // `[]`.
+        // Clip the most-recent-50 down to the most-recent-3 the
+        // dashboard renders. The stream itself is ordered
+        // newest-first by the repository, so `take(3)` is the
+        // correct slice.
+        final all = (snapshot.hasError && !snapshot.hasData)
+            ? const <HistoryEntry>[]
+            : (snapshot.data ?? const <HistoryEntry>[]);
+        final scans = all.length <= 3 ? all : all.take(3).toList();
         if (scans.isEmpty) {
           return Container(
             padding: const EdgeInsets.all(18),
@@ -1009,7 +1067,7 @@ class HomePage extends StatelessWidget {
                 thickness: 1,
                 color: AppTheme.borderSubtle,
               ),
-              _Pressable(
+              Pressable(
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => HistoryPage()),
@@ -1042,42 +1100,6 @@ class HomePage extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-// -------- Reusable bits --------
-
-/// Lightweight press-scale wrapper used by the home screen's actionable
-/// surfaces. Scales to 0.97 while a pointer is down, springs back on
-/// release. Purely cosmetic - no state is leaked to the parent.
-class _Pressable extends StatefulWidget {
-  const _Pressable({required this.child, required this.onTap});
-
-  final Widget child;
-  final VoidCallback onTap;
-
-  @override
-  State<_Pressable> createState() => _PressableState();
-}
-
-class _PressableState extends State<_Pressable> {
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) => setState(() => _pressed = false),
-      onTapCancel: () => setState(() => _pressed = false),
-      onTap: widget.onTap,
-      child: AnimatedScale(
-        scale: _pressed ? 0.97 : 1.0,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-        child: widget.child,
-      ),
     );
   }
 }
@@ -1124,7 +1146,7 @@ String _statusLabel(SafetyStatus status, String Function(String) tr) {
 /// Outer shell for the Safety Score card. Same `radiusXl` rounded
 /// surface + subtle border used by the "Learn" tile so the two
 /// stacked cards read as a pair. The press scale is reused from
-/// [_Pressable] so taps on the card feel identical to taps on the
+/// [Pressable] so taps on the card feel identical to taps on the
 /// hero CTA / run-check tile / Go Premium banner.
 class _ScoreCardShell extends StatelessWidget {
   const _ScoreCardShell({required this.child, this.onTap});
@@ -1144,7 +1166,7 @@ class _ScoreCardShell extends StatelessWidget {
       child: child,
     );
     if (onTap == null) return card;
-    return _Pressable(onTap: onTap!, child: card);
+    return Pressable(onTap: onTap!, child: card);
   }
 }
 
@@ -1295,6 +1317,11 @@ class _RecentScanTile extends StatelessWidget {
         );
       case ScanType.phone:
         return (icon: Icons.phone_outlined, labelKey: tr('history.typePhone'));
+      case ScanType.qr:
+        return (
+          icon: Icons.qr_code_scanner_rounded,
+          labelKey: tr('history.typeQr'),
+        );
     }
   }
 
@@ -1302,7 +1329,7 @@ class _RecentScanTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final meta = _typeMeta(context, entry.type);
     final style = RiskStyle.of(entry.result.level);
-    return _Pressable(
+    return Pressable(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

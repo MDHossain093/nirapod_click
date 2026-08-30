@@ -16,6 +16,24 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!--
+        Camera access for the QR Checker.
+
+        mobile_scanner requests this at runtime when the user taps
+        the QR tile, so the static declaration is enough — no
+        `maxSdkVersion` gymnastics here. `required="false"` keeps the
+        APK installable on devices without a camera (the QR Checker
+        still works because we offer a "Enter QR text manually"
+        fallback for tablets / cameras-blocked devices).
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+
     <application
         android:label="NirapodClick"
         android:name="${applicationName}"
@@ -41,6 +59,25 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!--
+                Share-target: receive plain-text shares from other apps
+                (SMS, WhatsApp, Messenger, browser, etc.) and route them
+                into the existing Message Checker. The `share_handler`
+                plugin (lib/services/share_intent_service.dart) catches
+                the ACTION_SEND intent on the platform side and exposes
+                the text via `getInitialSharedMedia` (cold start) and
+                `sharedMediaStream` (warm start).
+
+                We deliberately scope this to text/plain only — image
+                / file / multi-attachment shares fall through to the
+                system default behaviour because the NirapodClick
+                analysis pipeline is text-only.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

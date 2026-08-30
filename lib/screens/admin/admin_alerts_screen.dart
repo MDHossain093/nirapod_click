@@ -174,7 +174,7 @@ class _AdminAlertPreviewCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
+        border: Border.all(color: color.withValues(alpha: AppTheme.tintBorderEmphasis)),
       ),
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -188,7 +188,7 @@ class _AdminAlertPreviewCard extends StatelessWidget {
                   vertical: 3,
                 ),
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
+                  color: color.withValues(alpha: AppTheme.tintPanelSoft),
                   borderRadius: BorderRadius.circular(AppTheme.radiusXs),
                 ),
                 child: Text(
@@ -450,9 +450,9 @@ class _NoticeBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: AppTheme.warning.withValues(alpha: 0.12),
+        color: AppTheme.warning.withValues(alpha: AppTheme.tintPanelSoft),
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(color: AppTheme.warning.withValues(alpha: 0.4)),
+        border: Border.all(color: AppTheme.warning.withValues(alpha: AppTheme.tintBorderEmphasis)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

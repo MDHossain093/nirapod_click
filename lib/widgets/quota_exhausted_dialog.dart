@@ -17,6 +17,13 @@ import '../services/free_quota_service.dart';
 /// Centralising this keeps the four scanners focused on their own
 /// flow and guarantees the upgrade messaging is identical everywhere.
 /// If the copy or layout changes, one edit propagates to all four.
+///
+/// **Color semantics:** the accent icon and the usage recap card use
+/// [AppTheme.warning] (amber) — NOT [AppTheme.danger] (red). This is a
+/// deliberate distinction: reaching a usage quota is a soft "you can't
+/// continue right now" prompt, not an actual scam or system failure.
+/// Reserve [AppTheme.danger] / [AppTheme.riskCritical] for scam verdicts
+/// and truly destructive surfaces; do not recolor this sheet red.
 class QuotaExhaustedSheet {
   /// Convenience entry point — looks up [FreeQuotaScope] for the
   /// caller and shows the standard sheet. Returns the `Future` that
@@ -137,7 +144,7 @@ class QuotaExhaustedSheet {
                         boxShadow: [
                           BoxShadow(
                             color:
-                                AppTheme.primary.withValues(alpha: 0.30),
+                                AppTheme.primary.withValues(alpha: AppTheme.tintBorderStrong),
                             blurRadius: 14,
                             offset: const Offset(0, 6),
                           ),

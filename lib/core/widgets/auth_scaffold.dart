@@ -100,20 +100,31 @@ class AuthBrandPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: const [
-              Icon(Icons.shield_outlined,
-                  size: 36, color: Colors.white),
-              SizedBox(width: 12),
-              Text(
-                'NirapodClick',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
+          // Brand mark — same `logo_full.png` asset used by the splash
+          // and Premium screens so the brand reads identically across
+          // every branded surface. Sized at 48px height to match the
+          // visual weight of the previous shield + wordmark row.
+          // `errorBuilder` falls back to a generic shield if the asset
+          // is missing on a desktop build flavor.
+          Image.asset(
+            'assets/logo_full.png',
+            height: 48,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => Row(
+              children: const [
+                Icon(Icons.shield_outlined,
+                    size: 36, color: Colors.white),
+                SizedBox(width: 12),
+                Text(
+                  'NirapodClick',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: 48),
           const Text(
@@ -170,7 +181,7 @@ class _FeatureRow extends StatelessWidget {
           height: 40,
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(AppTheme.radiusXs),
           ),
           child: Icon(icon, color: Colors.white, size: 22),
         ),

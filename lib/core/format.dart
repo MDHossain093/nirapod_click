@@ -40,6 +40,15 @@ String relativeDateLabel(Object? createdAt) {
       return (icon: Icons.image_outlined, labelKey: 'history.typeScreenshot');
     case ScanType.phone:
       return (icon: Icons.phone_outlined, labelKey: 'history.typePhone');
+    case ScanType.qr:
+      // QR scans themselves are never persisted to history — they
+      // route to URL / phone / message checkers which save under
+      // their own ScanType. The fallback below covers any future
+      // code path that surfaces a `qr` value here.
+      return (
+        icon: Icons.qr_code_scanner_rounded,
+        labelKey: 'history.typeQr',
+      );
   }
 }
 

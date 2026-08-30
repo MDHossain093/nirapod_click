@@ -174,7 +174,7 @@ class _UrlRulePreviewCard extends StatelessWidget {
                   vertical: 3,
                 ),
                 decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.12),
+                  color: AppTheme.primary.withValues(alpha: AppTheme.tintPanelSoft),
                   borderRadius: BorderRadius.circular(AppTheme.radiusXs),
                 ),
                 child: Text(
@@ -194,7 +194,7 @@ class _UrlRulePreviewCard extends StatelessWidget {
                   vertical: 3,
                 ),
                 decoration: BoxDecoration(
-                  color: AppTheme.warning.withValues(alpha: 0.12),
+                  color: AppTheme.warning.withValues(alpha: AppTheme.tintPanelSoft),
                   borderRadius: BorderRadius.circular(AppTheme.radiusXs),
                 ),
                 child: Text(
@@ -259,7 +259,7 @@ class _Chip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
+        color: color.withValues(alpha: AppTheme.tintSurface),
         borderRadius: BorderRadius.circular(AppTheme.radiusXs),
       ),
       child: Text(
@@ -485,9 +485,9 @@ class _NoticeBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: AppTheme.warning.withValues(alpha: 0.12),
+        color: AppTheme.warning.withValues(alpha: AppTheme.tintPanelSoft),
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(color: AppTheme.warning.withValues(alpha: 0.4)),
+        border: Border.all(color: AppTheme.warning.withValues(alpha: AppTheme.tintBorderEmphasis)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

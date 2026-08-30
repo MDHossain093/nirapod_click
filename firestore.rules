@@ -33,8 +33,13 @@ service cloud.firestore {
     //   category          string  <= 64
     //   confidence        double  0..1
     //   reasons           [string]  <= 25, each <= 200
-    //   type              "message" | "url" | "screenshot" | "phone"  (optional,
-    //                     defaults to "message" if absent)
+    //   type              "message" | "url" | "screenshot" | "phone" | "qr"
+    //                     (optional, defaults to "message" if absent). The
+    //                     "qr" value is reserved for telemetry — QR scans
+    //                     themselves are not persisted (they route to the
+    //                     URL/phone/message checker) but the wire name is
+    //                     whitelisted so future analytics writes are
+    //                     permitted without a rules deploy.
     //   aiWasUnavailable  bool    (optional — true when local fallback was used)
     //   createdAt         server timestamp
     function isValidCheck() {
@@ -57,7 +62,7 @@ service cloud.firestore {
         && data.reasons.size() <= 25
         && (!('type' in data.keys())
             || (data.type is string
-                && data.type in ['message', 'url', 'screenshot', 'phone']))
+                && data.type in ['message', 'url', 'screenshot', 'phone', 'qr']))
         && data.createdAt == request.time;
     }
 

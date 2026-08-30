@@ -58,6 +58,24 @@ class AppTheme {
   static const double radiusXxl = 22;  // primary result header (URL/Phone)
   static const double radiusHero = 24; // marketing hero cards
 
+  /// Sheet top-corner radius. Every modal bottom sheet in the app
+  /// uses 24, and centralising the value here means a future
+  /// rebrand only needs one edit. Pre-token the literals were
+  /// sprinkled across the auth, profile, history, and alerts files.
+  static const double sheetCornerRadius = radiusHero;
+
+  /// Soft shadow alpha — used by white card shadows on the profile
+  /// header, learn cards, and result meta cards. Pre-token these
+  /// were literal `Colors.black..0.04` scattered across screens;
+  /// renaming them keeps future theme edits consistent.
+  static const double shadowSoftAlpha = 0.04;
+
+  /// Brand-tinted shadow alpha — used for hero card shadows that
+  /// sit over a teal/secondary surface (e.g. the lesson card on
+  /// Learn, the icon disc inside `_ProfileHeader`). Pre-token these
+  /// were literal `..0.15` values that drifted between screens.
+  static const double shadowBrandAlpha = 0.15;
+
   // Square tile sizes. Use to keep row + header icons consistent.
   static const double tileIconXs = 40; // inline icon discs (phone result, lesson shield)
   static const double tileIconSm = 44; // history rows
@@ -70,8 +88,22 @@ class AppTheme {
   static const double tintBorder = 0.25; // colored card border
   static const double tintSubtle = 0.08; // primary-tinted row icon
   static const double tintPanel = 0.06;  // primary-tinted reminder card
+  static const double tintBorderStrong = 0.30; // heavier colored border (CTA outlines, focus rings)
+  static const double tintBorderEmphasis = 0.40; // emphasized colored border (admin warning panels)
+  static const double tintPanelSoft = 0.12;    // soft colored panel fill (admin/filter rows)
+
+  // -- Header tint strip --------------------------------------------------
+  // Two soft tints of [primary] and [secondary] used as the gradient fill
+  // for the home greeting strip. Pairs with [borderSubtle] so the surface
+  // reads as a faint, "lived-in" header instead of a flat white card.
+  static const Color headerTintStart = Color(0xFFEAF1FB);
+  static const Color headerTintEnd = Color(0xFFE2F4F1);
 
   // -- Hero gradient ------------------------------------------------------
+  // 3-stop [primary -> mid-navy -> secondary] gradient used only on the
+  // pre-login auth splash and the auth scaffold background. The middle
+  // stop is a hand-tuned bridge (#1B4D7A) that softens the transition
+  // between the two brand hues on a tall surface.
   static const LinearGradient brandHeaderGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
@@ -86,6 +118,7 @@ class AppTheme {
   // 2-stop [primary -> secondary] gradient applied to every AppBar and
   // in-page header zone across the post-login app. Use this for any new
   // page-level header card so the visual language stays consistent.
+  // For the pre-login auth splash, prefer [brandHeaderGradient] instead.
   static const LinearGradient headerGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,

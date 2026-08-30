@@ -24,7 +24,14 @@ import '../../widgets/risk_disclaimer.dart';
 /// hybrid routing lives in [UrlHybridAnalyzer] so the screen stays
 /// orchestration-only.
 class UrlCheckerScreen extends StatefulWidget {
-  const UrlCheckerScreen({super.key});
+  const UrlCheckerScreen({super.key, this.initialValue});
+
+  /// Optional URL to pre-fill the input field with on first build.
+  ///
+  /// Used by the QR checker screen after a URL-shaped QR is decoded.
+  /// The user can edit or clear before tapping "Check", so a
+  /// pre-fill never auto-runs the analyzer.
+  final String? initialValue;
 
   @override
   State<UrlCheckerScreen> createState() =>
@@ -33,11 +40,17 @@ class UrlCheckerScreen extends StatefulWidget {
 
 class _UrlCheckerScreenState
     extends State<UrlCheckerScreen> {
-  final _controller = TextEditingController();
+  late final TextEditingController _controller;
   final _hybrid = UrlHybridAnalyzer();
 
   UrlRiskResult? _result;
   bool _isChecking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue ?? '');
+  }
 
   @override
   void dispose() {
@@ -172,7 +185,7 @@ class _UrlCheckerScreenState
                         borderRadius: BorderRadius.circular(AppTheme.radiusXs),
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.primary.withValues(alpha: 0.25),
+                            color: AppTheme.primary.withValues(alpha: AppTheme.tintBorder),
                             blurRadius: 12,
                             offset: const Offset(0, 5),
                           ),
@@ -251,7 +264,7 @@ class _UrlCheckerScreenState
         color: Colors.white,
         borderRadius: BorderRadius.circular(AppTheme.radiusXxl),
         border: Border.all(
-          color: color.withValues(alpha: 0.25),
+          color: color.withValues(alpha: AppTheme.tintBorder),
         ),
       ),
       child: Column(
@@ -271,7 +284,7 @@ class _UrlCheckerScreenState
                   width: AppTheme.tileIconXl,
                   height: AppTheme.tileIconXl,
                   decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.10),
+                    color: color.withValues(alpha: AppTheme.tintSurface),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -507,8 +520,8 @@ class _UrlCheckerScreenState
         vertical: 4,
       ),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(20),
+        color: color.withValues(alpha: AppTheme.tintSurface),
+        borderRadius: BorderRadius.circular(AppTheme.radiusXl),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

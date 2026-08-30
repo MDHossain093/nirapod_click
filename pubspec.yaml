@@ -52,6 +52,26 @@ dependencies:
   google_mlkit_text_recognition: ^0.13.1
   image_picker: ^1.1.2
 
+  # QR Code Scanner — live camera preview + on-device decoding.
+  # mobile_scanner wraps ML Kit Barcode Scanning on Android and the
+  # native AVFoundation barcode reader on iOS. Used by the QR Checker
+  # screen to classify the payload and route it to the existing URL /
+  # Phone / Message checkers.
+  mobile_scanner: ^5.2.3
+
+  # QR Scanner — permission rationale UI. permission_handler is needed
+  # only for the "permanently denied" branch where we have to deep-link
+  # the user to system settings; the first-time grant is handled
+  # directly by mobile_scanner.
+  permission_handler: ^11.3.1
+
+  # Android Share Intent — handles incoming ACTION_SEND / text/plain
+  # shares from other apps (SMS, WhatsApp, browsers, etc.). The
+  # service below wraps the plugin and hands the shared text to the
+  # existing MessageCheckerScreen's `initialValue` constructor
+  # parameter — the analysis pipeline itself is untouched.
+  share_handler: ^0.0.25
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -82,6 +102,7 @@ flutter:
   assets:
     - assets/icon.png
     - assets/logo_full.png
+    - assets/icon_launcher.png
     - .env
 
   # To add assets to your application, add an assets section, like this:
